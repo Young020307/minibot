@@ -1,7 +1,7 @@
 ---
 name: weather
 description: Get current weather and forecasts (no API key required).
-metadata: {"nanobot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+metadata: {"minibot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
 ---
 
 # Weather

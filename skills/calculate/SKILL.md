@@ -1,12 +1,11 @@
 ---
 name: calculate
-description: 统计输入的文本字数，并生成一句话简短总结
-always: true
+description: 统计用户输入的文本字数
 ---
 
 ## 功能说明
 
-统计用户输入的文本字数，并根据文本长度生成一句话简短总结。
+统计用户输入的文本字数。
 
 ## 调用方式
 
@@ -35,7 +34,6 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
   "status": "success",
   "skill": "counter_summarizer",
   "text_length": 20,
-  "summary": "短内容，主要表达：...",
   "note": "Skill executed successfully"
 }
 ```
@@ -44,5 +42,4 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 当用户请求以下内容时调用此技能：
 - 统计文字/字数/字符数
-- 对文本做简短总结
 - 分析文本长度

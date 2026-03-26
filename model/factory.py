@@ -15,5 +15,10 @@ class ChatModelFactory(BaseModelFactory):
     def generator(self) -> BaseChatModel:
         return ChatTongyi(model=agent_conf["chat_model_name"])
 
+class MemoryModelFactory(BaseModelFactory):
+    def generator(self) -> BaseChatModel:
+        return ChatTongyi(model=agent_conf["memory_model_name"])
+    
 chat_model = ChatModelFactory().generator()
+memory_model = MemoryModelFactory().generator()
 

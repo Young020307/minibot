@@ -1,19 +1,22 @@
 # agent/react_agent.py
 import sys
 from pathlib import Path
+
+from langchain.messages import AIMessageChunk
+from langchain_core.messages import AIMessage
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import sqlite3
-from langchain_core.messages import SystemMessage
+
 from langgraph.checkpoint.sqlite import SqliteSaver
-#极端耗时导包操作
 from langchain.agents import create_agent 
 
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
+from langchain.agents.middleware import SummarizationMiddleware, wrap_model_call
 from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
 from utils.logger_handler import logger
 from model.factory import chat_model
+from model.factory import memory_model
 
 class ReactAgent:
     def __init__(self):
@@ -22,27 +25,35 @@ class ReactAgent:
             check_same_thread=False,
         )
         self.checkpointer = SqliteSaver(self.conn)
-        self._build_agent()
         self.context_builder = ContextBuilder()
+        self._build_agent()
 
     def _build_agent(self):
         tools = get_all_tools()
         logger.info(f"[ReactAgent] 已加载工具: {[t.name for t in tools]}")
 
-        @wrap_model_call
-        def dynamic_prompt_middleware(request: ModelRequest, handler) -> ModelResponse:
-            """每次调用大模型前，动态注入最新的 System Prompt"""
-            # 通过实例调用 build_system_prompt
-            system_prompt = self.context_builder.build_system_prompt()
-            # 将动态生成的系统提示词插入到消息列表的最前面
-            request.messages = [SystemMessage(content=system_prompt)] + request.messages
-            return handler(request)
+        # @wrap_model_call
+        # def dynamic_prompt_middleware(request: ModelRequest, handler) -> ModelResponse:
+        #     """每次调用大模型前，动态注入最新的 System Prompt"""
+        #     # 通过实例调用 build_system_prompt
+        #     system_prompt = self.context_builder.build_system_prompt()
+        #     # 将动态生成的系统提示词插入到消息列表的最前面
+        #     request.messages = [SystemMessage(content=system_prompt)] + request.messages
+        #     return handler(request)
 
+        summarization_middleware= SummarizationMiddleware(
+        model=memory_model,
+        max_tokens_before_summary=2000,
+        messages_to_keep=10,
+    )
+        
         self.agent = create_agent(
             model=chat_model,  
             tools=tools,
+            #对话历史
             checkpointer=self.checkpointer,
-            middleware=[dynamic_prompt_middleware]
+            middleware=[summarization_middleware],       
+            system_prompt=self.context_builder.build_system_prompt(),
         )
         logger.info("[ReactAgent] Agent 构建完成")
 
@@ -50,35 +61,19 @@ class ReactAgent:
     # 流式输出
     # ──────────────────────────────────────────
 
-    def execute_stream(self, query: str, thread_id: str = "default", media: list[str] = None):
-        """流式返回 AI token，支持传入图片路径列表 (media)。"""
-        
-        # 4. 修改：利用 ContextBuilder 组装带有时间戳和图片的用户输入
-        # 获取格式化后的内容（可能是纯字符串，也可能是包含 base64 图片的列表）
-        user_content = self.context_builder._build_user_content(query, media)
-        
-        # 构造运行时上下文（强制带上当前时间）
-        runtime_ctx = (
-            f"{self.context_builder._RUNTIME_CONTEXT_TAG}\n"
-            f"Current Time: {self.context_builder._get_current_time_str()}"
-        )
-
-        # 融合上下文和用户输入
-        if isinstance(user_content, str):
-            merged_content = f"{runtime_ctx}\n\n{user_content}"
-        else:
-            merged_content = [{"type": "text", "text": runtime_ctx + "\n\n"}] + user_content
-
-        # 传入 LangGraph
-        input_dict = {"messages": [{"role": "user", "content": merged_content}]}
+    def execute_stream(self, query: str, thread_id: str = "default"):
+        input_dict = {"messages": [{"role": "user", "content": query}]}
         config = {"configurable": {"thread_id": thread_id}}
-
+    
         for chunk, metadata in self.agent.stream(
-            input_dict,
-            stream_mode="messages",
-            config=config,
+                input_dict,
+                stream_mode="messages",
+                context={"report": False},
+                config=config
         ):
-            if chunk.type == "ai" and chunk.content:
+            #print(f"[DEBUG] chunk type: {type(chunk)}, content: {chunk.content if hasattr(chunk, 'content') else 'N/A'}", file=sys.stderr)
+            # chunk 在这里直接是一个 MessageChunk 对象
+            if isinstance(chunk, (AIMessage, AIMessageChunk)) and chunk.content:
                 yield chunk.content
 
     # ──────────────────────────────────────────

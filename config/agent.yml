@@ -1,1 +1,2 @@
 chat_model_name: qwen-max
+memory_model_name: qwen1.5-110b-chat

@@ -7,4 +7,5 @@ langchain-core
 langchain-community
 langchain-mcp-adapters
 langgraph
+langgraph-checkpoint-sqlite
 tavily
