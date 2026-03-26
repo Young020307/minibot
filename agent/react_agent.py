@@ -31,7 +31,7 @@ class ReactAgent:
         @wrap_model_call
         def dynamic_prompt_middleware(request: ModelRequest, handler) -> ModelResponse:
             """每次调用大模型前，动态注入最新的 System Prompt"""
-            # 3. 修改：通过实例调用 build_system_prompt
+            # 通过实例调用 build_system_prompt
             system_prompt = self.context_builder.build_system_prompt()
             # 将动态生成的系统提示词插入到消息列表的最前面
             request.messages = [SystemMessage(content=system_prompt)] + request.messages
@@ -136,14 +136,14 @@ if __name__ == "__main__":
     thread_id = "terminal_session_01" 
     
     print("==================================================")
-    print("🤖 你的专属 LangGraph 助手已启动！")
+    print("🤖 你的专属助手已启动！")
     print("💡 提示：输入 'exit' 或按下 Ctrl + C 即可结束对话。")
     print("==================================================")
 
     while True:
         try:
-            # 1. 获取老弟的输入
-            user_input = input("\n🧑 老弟: ").strip()
+            # 1. 获取输入
+            user_input = input("\n🧑 Young: ").strip()
             
             # 如果不小心直接敲了回车，就跳过这次循环
             if not user_input:
@@ -151,7 +151,7 @@ if __name__ == "__main__":
                 
             # 如果输入 exit 或 quit，正常退出
             if user_input.lower() in ['exit', 'quit']:
-                print("\n👋 收到，老弟！助手已下线，咱们下次聊。")
+                print("\n👋 收到!助手已下线，咱们下次聊。")
                 break
 
             # 2. 调用 Agent 并流式输出回复

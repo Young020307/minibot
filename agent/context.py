@@ -42,10 +42,8 @@ class ContextBuilder:
         # 3. 注入技能摘要索引 (动态发现层)
         skills_summary = self._build_skills_summary()
         if skills_summary:
-            parts.append(f"""# Skills Summary
-
-The following skills extend your capabilities. To use a skill, call the list_skills tool or read its SKILL.md.
-
+            parts.append(f"""# 技能总结
+下面的技能可以扩展你的能力。要使用技能，请调用 list_skills 工具或阅读其 SKILL.md。
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)

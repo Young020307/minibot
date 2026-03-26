@@ -2,21 +2,20 @@ import os
 import asyncio
 import yaml
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 
 from langchain_core.tools import BaseTool
 from utils.logger_handler import logger
 from utils.path_tool import get_abs_path
-
-# 导入之前的 SkillsLoader
-from skills import SkillsLoader 
 from .agent_tools import (
     web_search,
     bash_exec,
     read_file,
     write_file,
     edit_file,
-    list_skills
+    list_skills,
+    get_skill_details,
+    _scan_skills,
 )
 
 class ToolRegistry:
@@ -29,9 +28,7 @@ class ToolRegistry:
 
     def __init__(self, workspace_path: Optional[Path] = None):
         self.workspace = workspace_path or Path.cwd()
-        # 初始化技能加载器
-        self.skills_loader = SkillsLoader(workspace=self.workspace)
-        
+
         # 基础本地工具定义
         self._base_tools: List[BaseTool] = [
             web_search,
@@ -40,23 +37,11 @@ class ToolRegistry:
             write_file,
             edit_file,
             list_skills,
+            get_skill_details,  # 按需加载 skill 详情
         ]
-        
+
         self._mcp_tools: List[BaseTool] = []
         self._last_mcp_config_hash = None
-
-    def build_discovery_skills(self) -> str:
-        """生成发现层信息：仅包含技能名和简短描述"""
-        skills = self.skills_loader.list_skills(filter_unavailable=True)
-        if not skills:
-            return "当前无可用技能。"
-        
-        lines = ["# 可用技能索引 (Discovery Layer)", "你可以通过 'get_skill_details' 工具查看以下技能的详细操作指南："]
-        for s in skills:
-            desc = self.skills_loader._get_skill_description(s["name"])
-            lines.append(f"- {s['name']}: {desc}")
-        
-        return "\n".join(lines)
 
     def _load_mcp_tools_sync(self) -> List[BaseTool]:
         """同步包装异步 MCP 加载过程"""
@@ -71,21 +56,18 @@ class ToolRegistry:
             return []
 
         async def fetch_tools():
-            # 这里简单实现，生产环境建议维护长连接 client
             config = yaml.safe_load(mcp_config_path.read_text(encoding="utf-8"))
             servers = {srv["name"]: srv for srv in config.get("servers", [])}
-            
+
             async with MultiServerMCPClient(servers) as client:
                 return await client.get_tools()
 
         try:
-            # 兼容已有事件循环的环境
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 如果在异步环境下运行（如 FastAPI/LangGraph），需特殊处理
                 import nest_asyncio
                 nest_asyncio.apply()
-            
+
             return asyncio.run(fetch_tools())
         except Exception as e:
             logger.error(f"MCP 工具加载失败: {e}")
@@ -98,20 +80,25 @@ class ToolRegistry:
         """
         if refresh_mcp or not self._mcp_tools:
             self._mcp_tools = self._load_mcp_tools_sync()
-            
+
         all_tools = self._base_tools + self._mcp_tools
         logger.info(f"注册表更新: {len(self._base_tools)} 本地, {len(self._mcp_tools)} MCP")
         return all_tools
 
+
 # ─────────────────────────────────────────────
 # 单例实例化
 # ─────────────────────────────────────────────
-# 获取当前工作目录作为默认 workspace
 registry = ToolRegistry(workspace_path=Path(os.getcwd()))
 
-# 向后兼容原有的函数接口
-def build_skills_context():
-    return registry.build_skills_context()
+# ─────────────────────────────────────────────
+# 模块级接口（供 context.py 等调用）
+# ─────────────────────────────────────────────
+def build_skills_context() -> str:
+    """返回所有 always:true 技能的完整正文，注入 system prompt（驻层）"""
+    skills = _scan_skills()
+    parts = [s["body"] for s in skills if s.get("always") and s.get("body")]
+    return "\n\n---\n\n".join(parts)
 
-def get_all_tools():
+def get_all_tools() -> List[BaseTool]:
     return registry.get_all_tools()
