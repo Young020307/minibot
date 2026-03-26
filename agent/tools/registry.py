@@ -13,9 +13,7 @@ from .agent_tools import (
     read_file,
     write_file,
     edit_file,
-    list_skills,
     get_skill_details,
-    _scan_skills,
 )
 
 class ToolRegistry:
@@ -36,7 +34,6 @@ class ToolRegistry:
             read_file,
             write_file,
             edit_file,
-            list_skills,
             get_skill_details,  # 按需加载 skill 详情
         ]
 
@@ -85,7 +82,6 @@ class ToolRegistry:
         logger.info(f"注册表更新: {len(self._base_tools)} 本地, {len(self._mcp_tools)} MCP")
         return all_tools
 
-
 # ─────────────────────────────────────────────
 # 单例实例化
 # ─────────────────────────────────────────────
@@ -94,11 +90,5 @@ registry = ToolRegistry(workspace_path=Path(os.getcwd()))
 # ─────────────────────────────────────────────
 # 模块级接口（供 context.py 等调用）
 # ─────────────────────────────────────────────
-def build_skills_context() -> str:
-    """返回所有 always:true 技能的完整正文，注入 system prompt（驻层）"""
-    skills = _scan_skills()
-    parts = [s["body"] for s in skills if s.get("always") and s.get("body")]
-    return "\n\n---\n\n".join(parts)
-
 def get_all_tools() -> List[BaseTool]:
     return registry.get_all_tools()

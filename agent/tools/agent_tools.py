@@ -46,7 +46,7 @@ def bash_exec(command: str, timeout: int = 60) -> str:
     # 危险命令黑名单
     _BLOCKED = ["rm -rf /", "format ", "dd if=", "shutdown", "mkfs"]
     if any(b in command for b in _BLOCKED):
-        return f"[拒绝] 该命令已被安全策略阻止: {command}"
+        return f"[拒绝] 该命令已被安全策略阻止：{command}"
     try:
         result = subprocess.run(
             command,
@@ -99,43 +99,30 @@ def edit_file(path: str, content: str) -> str:
     except Exception as e:
         return f"[错误] 无法追加文件 {path}: {e}"
 
-@tool(description="调用此工具获取该技能的完整操作指南和代码示例。输入技能名称（目录名），输出该技能的完整 SKILL.md 内容，供 Agent 理解和使用。")
+@tool(description="当确定要使用某个技能时，调用此工具获取该技能的详细操作指南。输入技能的名称，输出对应的 Markdown 文件全文。")
 def get_skill_details(skill_name: str) -> str:
-    from .registry import registry # 避免循环引用
-    content = registry.skills_loader.load_skill(skill_name)
-    if content:
-        # 移除元数据，只给 Agent 看正文
-        body = registry.skills_loader._strip_frontmatter(content)
-        return f"### 技能 {skill_name} 的详细操作指南：\n\n{body}"
-    return f"未找到技能: {skill_name}"
+    logger.info(f"[get_skill_details] 获取技能详情: {skill_name}")
+    # 1. 构建该技能文件夹的绝对路径
+    skill_folder = Path(get_abs_path("skills")) / skill_name
+    
+    # 2. 基础检查：文件夹是否存在
+    if not skill_folder.exists() or not skill_folder.is_dir():
+        return f"错误：未找到名为 '{skill_name}' 的技能文件夹。"
 
-@tool(description="列出所有可用的本地技能（skills）及其描述")
-def list_skills() -> str:
-    """List all available local skills loaded from the skills/ directory."""
-    skills = _scan_skills()
-    if not skills:
-        return "暂无可用技能"
-    lines = [f"- **{s['name']}**: {s['description']}" for s in skills]
-    return "## 可用技能\n\n" + "\n".join(lines)
+    try:
+        # 3. 寻找文件夹下的第一个 .md 文件
+        md_files = list(skill_folder.glob("*.md"))
+        if not md_files:
+            return f"错误：在技能文件夹 '{skill_name}' 中未找到任何 Markdown 说明文件。"
+        
+        target_md = md_files[0]
+        
+        # 4. 读取并返回全文
+        content = target_md.read_text(encoding="utf-8")
+        return content
 
-def _scan_skills() -> list[dict]:
-    """扫描 skills/ 目录，解析每个 SKILL.md 的 YAML front-matter。"""
-    skills_dir = Path(get_abs_path("skills"))
-    if not skills_dir.exists():
-        return []
-    results = []
-    for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
-        try:
-            text = skill_md.read_text(encoding="utf-8")
-            if text.startswith("---"):
-                _, fm, body = text.split("---", 2)
-                meta = yaml.safe_load(fm)
-                results.append({
-                    "name": meta.get("name", skill_md.parent.name),
-                    "description": meta.get("description", ""),
-                    "always": meta.get("always", False),
-                    "body": body.strip(),
-                })
-        except Exception as e:
-            logger.warning(f"[registry] 解析 skill 失败: {skill_md} — {e}")
-    return results
+    except Exception as e:
+        logger.error(f"[get_skill_details]读取技能时发生异常： {e}")
+        return f"错误：在读取技能 '{skill_name}' 的说明文件时发生异常。"
+    
+

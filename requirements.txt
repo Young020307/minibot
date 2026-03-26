@@ -1,0 +1,10 @@
+streamlit
+fastapi
+pydantic
+pyyaml
+langchain
+langchain-core
+langchain-community
+langchain-mcp-adapters
+langgraph
+tavily

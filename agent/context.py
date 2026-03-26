@@ -1,7 +1,10 @@
 import sys
 from pathlib import Path
+
+import yaml
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
+import json
 import base64
 import mimetypes
 import platform
@@ -11,7 +14,6 @@ from typing import Any, List, Dict
 
 from utils.path_tool import get_abs_path
 from utils.logger_handler import logger
-from agent.tools.registry import build_skills_context, _scan_skills
 
 class ContextBuilder:
     """构建 Agent 的完整上下文（包括 System Prompt 和多轮对话 Messages）"""
@@ -34,18 +36,15 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        # 2. 注入常驻技能 (always: true)
-        always_content = build_skills_context()
-        if always_content:
-            parts.append(f"# Active Skills\n\n{always_content}")
+        # # 2. 注入常驻技能 (always: true)
+        # always_content = build_skills_context()
+        # if always_content:
+        #     parts.append(f"# Active Skills\n\n{always_content}")
 
         # 3. 注入技能摘要索引 (动态发现层)
-        skills_summary = self._build_skills_summary()
+        skills_summary = self._get_skills_summary()
         if skills_summary:
-            parts.append(f"""# 技能总结
-下面的技能可以扩展你的能力。要使用技能，请调用 list_skills 工具或阅读其 SKILL.md。
-{skills_summary}""")
-
+            parts.append(skills_summary)
         return "\n\n---\n\n".join(parts)
 
     def _get_identity(self) -> str:
@@ -97,18 +96,52 @@ Your current workspace is: {workspace_str}
                     logger.error(f"[ContextBuilder] 读取 {filename} 失败: {e}")
         return "\n\n".join(parts) if parts else ""
 
-    def _build_skills_summary(self) -> str:
-        """构建技能列表的简要索引，防止 Prompt 过长"""
-        skills = _scan_skills()
-        if not skills:
-            return ""
-        # 仅展示未被 always 加载的技能索引
-        summary_lines = [
-            f"- **{s['name']}**: {s['description']}" 
-            for s in skills if not s.get("always")
-        ]
-        return "\n".join(summary_lines)
+    def _get_skills_summary(self) -> str:
+        """
+        扫描 skills/ 目录下的子文件夹，解析 .md 文件的 YAML front-matter，
+        并返回格式化的 JSON 索引字符串。
+        """
+        skills_dir = Path(get_abs_path("skills"))
 
+        if not skills_dir.exists() or not skills_dir.is_dir():
+            return "SKILLS = {}"
+
+        skills_index = {}
+
+        # 遍历 skills 下的每一个子目录
+        for skill_folder in skills_dir.iterdir():
+            if skill_folder.is_dir():
+                # 在子目录下寻找第一个 .md 文件
+                md_files = list(skill_folder.glob("*.md"))
+                if not md_files:
+                    continue
+                
+                skill_md = md_files[0]  # 取文件夹下的第一个 md 文件
+                skill_key = skill_folder.name  # 文件夹名作为 key
+                
+                try:
+                    content = skill_md.read_text(encoding="utf-8")
+                    # 检查并解析 YAML front-matter
+                    if content.startswith("---"):
+                        parts = content.split("---", 2)
+                        if len(parts) >= 3:
+                            meta = yaml.safe_load(parts[1]) or {}
+                            
+                            # 组装技能信息
+                            skills_index[skill_key] = {
+                                "name": meta.get("name", skill_key),
+                                "description": meta.get("description", ""),
+                                "path": f"skills/{skill_key}/{skill_md.name}"
+                            }
+                except Exception as e:
+                    # 假设 logger 已在外部定义
+                    print(f"[Error] 无法解析 {skill_md}: {e}")
+
+        # 将字典转换为 JSON 格式的字符串
+        # ensure_ascii=False 保证中文正常显示，indent=4 增加可读性
+        json_str = json.dumps(skills_index, ensure_ascii=False, indent=4)
+        return f"SKILLS = {json_str}"
+    
     @staticmethod
     def _get_current_time_str() -> str:
         now = datetime.datetime.now()

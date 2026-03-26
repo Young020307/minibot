@@ -6,9 +6,10 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 import sqlite3
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents import create_agent
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
+#极端耗时导包操作
+from langchain.agents import create_agent 
 
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
 from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
 from utils.logger_handler import logger
@@ -129,12 +130,11 @@ class ReactAgent:
         except Exception as e:
             logger.error(f"[ReactAgent] 删除线程失败: {e}")
 
-
 if __name__ == "__main__":
     agent = ReactAgent()
+
     # 设定一个固定的 thread_id，这样它就能记住你们前几轮聊了啥
     thread_id = "terminal_session_01" 
-    
     print("==================================================")
     print("🤖 你的专属助手已启动！")
     print("💡 提示：输入 'exit' 或按下 Ctrl + C 即可结束对话。")
@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
         except KeyboardInterrupt:
             # 捕捉咱们键盘按下的 Ctrl + C (终端标准中断按键)
-            print("\n\n🛑 检测到中断信号 (Ctrl+C)，强制退出对话。老弟拜拜！")
+            print("\n\n🛑 检测到中断信号 (Ctrl+C)，强制退出对话。拜拜！")
             break
             
         except Exception as e:
