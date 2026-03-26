@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
@@ -124,5 +125,3 @@ def get_skill_details(skill_name: str) -> str:
     except Exception as e:
         logger.error(f"[get_skill_details]读取技能时发生异常： {e}")
         return f"错误：在读取技能 '{skill_name}' 的说明文件时发生异常。"
-    
-

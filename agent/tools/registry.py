@@ -14,6 +14,7 @@ from .agent_tools import (
     write_file,
     edit_file,
     get_skill_details,
+    todo
 )
 
 class ToolRegistry:
@@ -34,7 +35,8 @@ class ToolRegistry:
             read_file,
             write_file,
             edit_file,
-            get_skill_details,  # 按需加载 skill 详情
+            get_skill_details,# 按需加载 skill 详情
+            todo  
         ]
 
         self._mcp_tools: List[BaseTool] = []
@@ -88,7 +90,7 @@ class ToolRegistry:
 registry = ToolRegistry(workspace_path=Path(os.getcwd()))
 
 # ─────────────────────────────────────────────
-# 模块级接口（供 context.py 等调用）
+# 接口（供 react_agent.py 等调用）
 # ─────────────────────────────────────────────
 def get_all_tools() -> List[BaseTool]:
     return registry.get_all_tools()

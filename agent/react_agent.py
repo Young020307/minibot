@@ -10,7 +10,7 @@ import sqlite3
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langchain.agents import create_agent 
-
+from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware import SummarizationMiddleware, wrap_model_call
 from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
@@ -41,18 +41,21 @@ class ReactAgent:
         #     request.messages = [SystemMessage(content=system_prompt)] + request.messages
         #     return handler(request)
 
-        summarization_middleware= SummarizationMiddleware(
+        # 上下文总结中间件
+        Summarization_Middleware= SummarizationMiddleware(
         model=memory_model,
         max_tokens_before_summary=2000,
-        messages_to_keep=10,
-    )
+        messages_to_keep=10)
+
         
         self.agent = create_agent(
             model=chat_model,  
             tools=tools,
-            #对话历史
+            # 对话历史
             checkpointer=self.checkpointer,
-            middleware=[summarization_middleware],       
+            # 中间件
+            middleware=[Summarization_Middleware,
+                        TodoListMiddleware()],       
             system_prompt=self.context_builder.build_system_prompt(),
         )
         logger.info("[ReactAgent] Agent 构建完成")
@@ -124,7 +127,7 @@ class ReactAgent:
             logger.info(f"[ReactAgent] 已删除线程: {thread_id}")
         except Exception as e:
             logger.error(f"[ReactAgent] 删除线程失败: {e}")
-
+   
 if __name__ == "__main__":
     agent = ReactAgent()
 
