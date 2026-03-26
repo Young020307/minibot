@@ -1,0 +1,19 @@
+2026-03-25 23:23:02,234 - agent - DEBUG - registry.py:168 - [registry] config/mcp.yml 不存在，跳过 MCP 工具加载
+2026-03-25 23:23:02,235 - agent - INFO - registry.py:234 - [registry] 共注册 6 个工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:23:02,235 - agent - INFO - react_agent.py:30 - [ReactAgent] 已加载工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:24:23,576 - agent - DEBUG - registry.py:168 - [registry] config/mcp.yml 不存在，跳过 MCP 工具加载
+2026-03-25 23:24:23,576 - agent - INFO - registry.py:234 - [registry] 共注册 6 个工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:24:23,576 - agent - INFO - react_agent.py:30 - [ReactAgent] 已加载工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:29:19,309 - agent - DEBUG - registry.py:168 - [registry] config/mcp.yml 不存在，跳过 MCP 工具加载
+2026-03-25 23:29:19,309 - agent - INFO - registry.py:234 - [registry] 共注册 6 个工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:29:19,309 - agent - INFO - react_agent.py:31 - [ReactAgent] 已加载工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:29:19,330 - agent - INFO - react_agent.py:48 - [ReactAgent] Agent 构建完成
+2026-03-25 23:29:39,976 - agent - INFO - registry.py:71 - [write_file] 写入: poem.txt
+2026-03-25 23:44:58,453 - agent - DEBUG - registry.py:71 - [registry] config/mcp.yml 不存在，跳过 MCP 工具加载
+2026-03-25 23:44:58,453 - agent - INFO - registry.py:137 - [registry] 共注册 6 个工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:44:58,453 - agent - INFO - react_agent.py:29 - [ReactAgent] 已加载工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:44:58,460 - agent - INFO - react_agent.py:46 - [ReactAgent] Agent 构建完成
+2026-03-25 23:47:07,514 - agent - DEBUG - registry.py:71 - [registry] config/mcp.yml 不存在，跳过 MCP 工具加载
+2026-03-25 23:47:07,514 - agent - INFO - registry.py:137 - [registry] 共注册 6 个工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:47:07,515 - agent - INFO - react_agent.py:29 - [ReactAgent] 已加载工具: ['web_search', 'bash_exec', 'read_file', 'write_file', 'edit_file', 'list_skills']
+2026-03-25 23:47:07,517 - agent - INFO - react_agent.py:46 - [ReactAgent] Agent 构建完成
