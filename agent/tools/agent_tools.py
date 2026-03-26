@@ -86,7 +86,6 @@ def write_file(path: str, content: str) -> str:
     except Exception as e:
         return f"[错误] 无法写入文件 {path}: {e}"
 
-
 @tool(description="向文件末尾追加内容。path 为相对项目根目录的路径或绝对路径。")
 def edit_file(path: str, content: str) -> str:
     """Append text content to a file."""
@@ -100,8 +99,17 @@ def edit_file(path: str, content: str) -> str:
     except Exception as e:
         return f"[错误] 无法追加文件 {path}: {e}"
 
+@tool(description="当你根据索引判断某个技能可能对当前任务有帮助时，调用此工具获取该技能的完整操作指南和代码示例。。输入技能名称（目录名），输出该技能的完整 SKILL.md 内容，供 Agent 理解和使用。")
+def get_skill_details(skill_name: str) -> str:
+    from .registry import registry # 避免循环引用
+    content = registry.skills_loader.load_skill(skill_name)
+    if content:
+        # 移除元数据，只给 Agent 看正文
+        body = registry.skills_loader._strip_frontmatter(content)
+        return f"### 技能 {skill_name} 的详细操作指南：\n\n{body}"
+    return f"未找到技能: {skill_name}"
 
-@tool(description="列出所有可用的本地技能（skills）及其描述。")
+@tool(description="当发现目前已有的工具并不能解决用户问题时，列出所有可用的本地技能（skills）及其描述")
 def list_skills() -> str:
     """List all available local skills loaded from the skills/ directory."""
     skills = _scan_skills()
