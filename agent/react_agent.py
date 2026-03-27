@@ -1,10 +1,11 @@
 # agent/react_agent.py
+import asyncio
 import sys
 from pathlib import Path
-
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from langchain.messages import AIMessageChunk
 from langchain_core.messages import AIMessage
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 
 import sqlite3
 
@@ -47,7 +48,6 @@ class ReactAgent:
         max_tokens_before_summary=2000,
         messages_to_keep=10)
 
-        
         self.agent = create_agent(
             model=chat_model,  
             tools=tools,
@@ -127,6 +127,25 @@ class ReactAgent:
             logger.info(f"[ReactAgent] 已删除线程: {thread_id}")
         except Exception as e:
             logger.error(f"[ReactAgent] 删除线程失败: {e}")
+
+    async def execute_background_task(self, task_query: str, thread_id: str = "heartbeat_daemon") -> str:
+        """
+        接收心跳服务传来的任务，执行并返回完整结果。
+        这里默认使用一个专门的 thread_id ("heartbeat_daemon")，
+        避免后台任务污染用户正常对话的上下文历史。
+        """
+        def _run_sync():
+            # 收集流式输出的片段，组合成完整字符串
+            full_response = ""
+            for chunk in self.execute_stream(task_query, thread_id=thread_id):
+                full_response += chunk
+            return full_response
+
+        # 因为你的 execute_stream 是同步的生成器，
+        # 为了不阻塞 HeartbeatService 的 async 事件循环，我们把它放到线程中运行
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, _run_sync)
+        return result
    
 if __name__ == "__main__":
     agent = ReactAgent()

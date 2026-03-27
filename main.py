@@ -1,73 +1,49 @@
-import uuid
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse, Response
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+import asyncio
+from pathlib import Path
+from utils.logger_handler import logger
+
 from agent.react_agent import ReactAgent
+from agent.heartbeat.service import HeartbeatService
+from model.dashscope import DashScopeProvider
 
-app = FastAPI()
+async def main():
+    # 1. 初始化 ReactAgent (执行器)
+    agent = ReactAgent()
+    logger.info("ReactAgent 启动成功。")
 
-# 全局 agent 实例（复用同一个 checkpointer 连接）
-agent = ReactAgent()
+    # 2. 定义回调函数：当心跳服务发现任务时，该怎么做？
+    async def on_heartbeat_execute(tasks: str) -> str:
+        logger.info(f"👉 收到心跳任务，转交 Agent 执行: {tasks}")
+        # 调用我们刚刚在 ReactAgent 中新增的方法
+        response = await agent.execute_background_task(tasks, thread_id="background_tasks")
+        return response
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+    # 3. 定义通知函数：Agent 觉得需要通知时，发往哪里？
+    async def on_heartbeat_notify(response: str):
+        # 这里可以接入微信、钉钉、Telegram 或前端 WebSocket 弹窗
+        logger.info(f"🔔 【系统通知】 Agent 完成了后台任务:\n{response}")
 
-@app.get("/favicon.ico")
-def favicon():
-    return Response(status_code=204)
+    # 4. 初始化心跳服务 (触发器)
+    # 注意：需要传入 HeartbeatService 所需的 provider，你可以复用 ReactAgent 里的模型对象
+    heartbeat = HeartbeatService(
+        workspace=Path(__file__).resolve().parent, # 指向你的工作区
+        provider=DashScopeProvider(), # 替换为 HeartbeatService 需要的 Provider 实例
+        model="qwen-max",             # 替换为你的模型名
+        interval_s= 60*30 ,          # 例如 30 分钟检查一次
+        on_execute=on_heartbeat_execute,
+        on_notify=on_heartbeat_notify
+    )
 
-@app.get("/")
-def index():
-    return FileResponse("static/index.html")
+    # 5. 启动心跳服务 (后台运行)
+    await heartbeat.start()
 
+    # 保持主程序运行 
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except KeyboardInterrupt:
+        heartbeat.stop()
+        logger.info("系统关闭。")
 
-# ---------- 数据模型 ----------
-class ChatRequest(BaseModel):
-    message: str
-
-
-# ---------- 会话管理 ----------
-@app.get("/threads")
-def get_threads():
-    all_ids = agent.get_all_threads()
-    threads = []
-    for tid in all_ids:
-        history = agent.get_history(tid)
-        title = "新对话"
-        first_user = next((m["content"] for m in history if m["role"] == "user"), None)
-        if first_user:
-            title = first_user[:20] + ("..." if len(first_user) > 20 else "")
-        threads.append({"thread_id": tid, "title": title})
-    # 若数据库为空，返回一个默认会话
-    if not threads:
-        threads = [{"thread_id": "default", "title": "新对话"}]
-    return threads
-
-@app.post("/threads")
-def create_thread():
-    new_id = uuid.uuid4().hex
-    return {"thread_id": new_id, "title": "新对话"}
-
-@app.delete("/threads/{thread_id}")
-def delete_thread(thread_id: str):
-    agent.delete_thread(thread_id)
-    return {"ok": True}
-
-
-@app.get("/threads/{thread_id}/messages")
-def get_messages(thread_id: str):
-    return agent.get_history(thread_id)
-
-
-# ---------- 流式对话 ----------
-@app.post("/threads/{thread_id}/chat")
-def chat(thread_id: str, req: ChatRequest):
-    def generate():
-        for token in agent.execute_stream(req.message, thread_id=thread_id):
-            yield f"data: {token}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream",
-                             headers={"X-Accel-Buffering": "no", 
-                                      "Cache-Control": "no-cache",
-                                      "Connection": "keep-alive"})
+if __name__ == "__main__":
+    asyncio.run(main())

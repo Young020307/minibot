@@ -14,7 +14,6 @@ from .agent_tools import (
     write_file,
     edit_file,
     get_skill_details,
-    todo
 )
 
 class ToolRegistry:
@@ -36,7 +35,6 @@ class ToolRegistry:
             write_file,
             edit_file,
             get_skill_details,# 按需加载 skill 详情
-            todo  
         ]
 
         self._mcp_tools: List[BaseTool] = []
