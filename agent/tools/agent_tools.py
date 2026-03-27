@@ -1,5 +1,7 @@
+from dataclasses import Field
 import sys
 from pathlib import Path
+from typing import Optional
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 import subprocess
@@ -7,9 +9,8 @@ from langchain_core.tools import tool
 from utils.logger_handler import logger
 from utils.path_tool import get_abs_path
 from utils.config_handler import api_conf
-from tavily import TavilyClient
 
-# 基础工具
+from tavily import TavilyClient
 
 #初始化Tavily
 tavily_client = TavilyClient(api_key=api_conf.get("TAVILY_API_KEY"))
@@ -123,39 +124,39 @@ def get_skill_details(skill_name: str) -> str:
     except Exception as e:
         logger.error(f"[get_skill_details]读取技能时发生异常： {e}")
         return f"错误：在读取技能 '{skill_name}' 的说明文件时发生异常。"
-    """将 HEARTBEAT.md Active Tasks 中匹配的任务移动到 Completed 区块。"""
-    logger.info(f"[complete_heartbeat_task] 完成/移除心跳任务: {task_keyword}")
-    try:
-        content = _read_heartbeat()
-        
-        active_marker = "<!-- Add your periodic tasks below this line -->"
-        completed_marker = "<!-- Move completed tasks here or delete them -->"
-        
-        if active_marker not in content or completed_marker not in content:
-            return "[错误] HEARTBEAT.md 格式不符合预期，缺少必要锚点。"
-        
-        lines = content.splitlines()
-        matched_line = None
-        new_lines = []
-        
-        # 找到并移除匹配行
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("- ") and task_keyword.lower() in stripped.lower():
-                matched_line = stripped
-            else:
-                new_lines.append(line)
-        
-        if not matched_line:
-            return f"[提示] 未在 Active Tasks 中找到包含 '{task_keyword}' 的任务。"
-        
-        # 将匹配的任务插入 Completed 区块
-        new_content = "\n".join(new_lines)
-        new_content = new_content.replace(
-            completed_marker,
-            f"{completed_marker}\n{matched_line}"
-        )
-        _write_heartbeat(new_content)
-        return f"✅ 已将任务移至 Completed：{matched_line}"
-    except Exception as e:
-        return f"[错误] 操作失败: {e}"
+
+from agent.tools.cron import cron_state
+@tool()
+def cron_tool(
+    action: str,
+    message: str ="",
+    every_seconds: Optional[int] = None,
+    delay_seconds: Optional[int] = None,
+    cron_expr: Optional[str] = None,
+    tz: Optional[str] = None,
+    at: Optional[str] = None,
+    job_id: Optional[str] = None,
+    is_task: bool = False
+) -> str:
+    """
+    安排提醒与周期性任务。支持以下操作：添加、列出、删除。
+    Args:
+        action: Action to perform: 'add', 'list', or 'remove'.
+        message: Reminder message or task description (for add).
+        every_seconds: Interval in seconds (for recurring tasks). E.g. 3600 for every hour.
+        delay_seconds: Delay from now in seconds for one-time tasks. E.g. 1800 for 20 minutes from now.
+        cron_expr: Cron expression like '0 9 * * *' (for scheduled tasks like 'every day at 9am').
+        tz: IANA timezone for cron expressions (e.g. 'Asia/Shanghai').
+        at: ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). Use delay_seconds instead when user specifies a relative time.
+        job_id: Job ID (for remove).
+    """
+    if action == "add":
+        if cron_state._in_cron_context.get():
+            return "Error: cannot schedule new jobs from within a cron job execution"
+        # 👈 修改：确保把 is_task 传递给 _add_job
+        return cron_state._add_job(message, every_seconds, cron_expr, tz, at, delay_seconds, is_task=is_task)
+    elif action == "list":
+        return cron_state._list_jobs()
+    elif action == "remove":
+        return cron_state._remove_job(job_id)
+    return f"Unknown action: {action}"

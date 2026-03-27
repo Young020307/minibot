@@ -1,8 +1,30 @@
 import os
 import time
 import uuid
+import asyncio
+import threading
+import queue
 import streamlit as st
 from agent.react_agent import ReactAgent
+
+# ---------- Async Runner Helper (核心桥接层) ----------
+# 解决 Streamlit 刷新导致 aiosqlite 连接不同 Loop 的问题
+def start_background_loop(loop: asyncio.AbstractEventLoop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+if "async_loop" not in st.session_state:
+    _loop = asyncio.new_event_loop()
+    st.session_state["async_loop"] = _loop
+    # 开启一个后台守护线程专门跑 async 事件循环
+    t = threading.Thread(target=start_background_loop, args=(_loop,), daemon=True)
+    t.start()
+
+def run_async(coro):
+    """在后台事件循环中同步执行异步函数，并返回结果"""
+    future = asyncio.run_coroutine_threadsafe(coro, st.session_state["async_loop"])
+    return future.result()
+
 
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="智能助手", layout="wide")
@@ -15,25 +37,27 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ---------- 初始化 session_state ----------
 if "agent" not in st.session_state:
-    st.session_state["agent"] = ReactAgent()
+    agent = ReactAgent()
+    # 异步初始化 Agent（加载数据库、心跳等）
+    run_async(agent.initialize())
+    st.session_state["agent"] = agent
 
 # 存储所有对话的元信息（thread_id 和标题）
 if "threads" not in st.session_state:
-    all_threads = st.session_state["agent"].get_all_threads()
+    # 异步获取历史线程
+    all_threads = run_async(st.session_state["agent"].get_all_threads())
     if all_threads:
         threads = []
         for tid in all_threads:
-            history = st.session_state["agent"].get_history(tid)
+            # 异步获取具体记录
+            history = run_async(st.session_state["agent"].get_history(tid))
             title = "未命名对话"
             if history:
-                # 寻找第一条用户消息作为标题
                 for m in history:
                     if m["role"] == "user":
-                        # 处理多模态内容（如果是列表，取文本部分）
                         content = m["content"]
                         text_content = content if isinstance(content, str) else next((item["text"] for item in content if item.get("type") == "text"), "")
                         if text_content:
-                            # 过滤掉注入的 Runtime Context
                             if "[Runtime Context" in text_content:
                                 text_content = text_content.split("\n\n", 1)[-1] if "\n\n" in text_content else text_content
                             title = text_content[:20] + ("..." if len(text_content) > 20 else "")
@@ -73,7 +97,8 @@ with st.sidebar:
         with col2:
             if len(st.session_state["threads"]) > 1:
                 if st.button("🗑️", key=f"del_{thread['thread_id']}"):
-                    st.session_state["agent"].delete_thread(thread["thread_id"])
+                    # 异步删除线程
+                    run_async(st.session_state["agent"].delete_thread(thread["thread_id"]))
                     st.session_state["threads"] = [t for t in st.session_state["threads"] if t["thread_id"] != thread["thread_id"]]
                     if st.session_state["current_thread"] == thread["thread_id"]:
                         st.session_state["current_thread"] = st.session_state["threads"][0]["thread_id"]
@@ -85,27 +110,24 @@ with st.sidebar:
 
 # ---------- 主区域：显示当前对话的消息 ----------
 current_thread = st.session_state["current_thread"]
-history = st.session_state["agent"].get_history(thread_id=current_thread)
+# 异步获取当前线程历史
+history = run_async(st.session_state["agent"].get_history(thread_id=current_thread))
 
 def render_message_content(content):
     """渲染可能包含图片和 Runtime Context 的多模态消息"""
     if isinstance(content, str):
-        # 纯文本模式下过滤上下文
         display_text = content.split("\n\n", 1)[-1] if "[Runtime Context" in content else content
         st.markdown(display_text)
     elif isinstance(content, list):
-        # 多模态列表模式
         for item in content:
             if isinstance(item, dict):
                 if item.get("type") == "text":
                     text = item.get("text", "")
-                    # 过滤掉不需要让用户看到的系统时间戳
                     if "[Runtime Context" in text:
                         text = text.split("\n\n", 1)[-1] if "\n\n" in text else ""
                     if text.strip():
                         st.markdown(text)
                 elif item.get("type") == "image_url":
-                    # 渲染 Base64 图片
                     img_data = item["image_url"]["url"]
                     st.image(img_data, width=300)
 
@@ -117,7 +139,6 @@ for message in history:
 prompt = st.chat_input("输入你的问题...")
 
 if prompt:
-    # 1. 处理上传的图片附件
     media_paths = []
     if uploaded_files:
         for f in uploaded_files:
@@ -126,13 +147,11 @@ if prompt:
                 out.write(f.read())
             media_paths.append(file_path)
 
-    # 2. 界面上先显示用户输入的内容（优化体验，不刷新页面立即显示）
     with st.chat_message("user"):
         st.markdown(prompt)
         for path in media_paths:
             st.image(path, width=300)
 
-    # 3. 更新对话标题（如果是新对话）
     if len(history) == 0:
         new_title = prompt[:20] + ("..." if len(prompt) > 20 else "")
         for t in st.session_state["threads"]:
@@ -140,25 +159,41 @@ if prompt:
                 t["title"] = new_title
                 break
 
-    # 4. 调用 agent 流式生成回复
+    # 4. 调用 agent 流式生成回复（通过队列桥接异步生成器和同步前端）
     with st.spinner("思考中..."):
-        # 注意这里传入了 media_paths 数组
-        response_generator = st.session_state["agent"].execute_stream(
-            prompt, 
-            thread_id=current_thread, 
-            media=media_paths
-        )
+        def stream_response(query, tid, medias):
+            q = queue.Queue()
+            
+            # 👈 核心修复点 1：在主线程提前将 agent 取出，赋值给局部变量
+            current_agent = st.session_state["agent"]
+            
+            async def _stream():
+                try:
+                    kwargs = {"thread_id": tid}
+                    if medias: 
+                        kwargs["media"] = medias 
+                        
+                    # 👈 核心修复点 2：这里使用 current_agent，而不是 st.session_state["agent"]
+                    async for chunk in current_agent.execute_stream(query, **kwargs):
+                        q.put(chunk)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    q.put(f"\n[Error] {str(e)}")
+                finally:
+                    q.put(None) # 发送结束信号
 
-        def capture_and_stream(generator, cache):
-            for chunk in generator:
-                cache.append(chunk)
-                for char in chunk:
-                    time.sleep(0.01)
-                    yield char
+            # 提交到后台循环执行
+            asyncio.run_coroutine_threadsafe(_stream(), st.session_state["async_loop"])
+            
+            # 主线程同步读取队列并 yield 给 st.write_stream
+            while True:
+                chunk = q.get()
+                if chunk is None:
+                    break
+                yield chunk
 
-        response_chunks = []
         with st.chat_message("assistant"):
-            st.write_stream(capture_and_stream(response_generator, response_chunks))
+            st.write_stream(stream_response(prompt, current_thread, media_paths))
 
-    # 5. 执行完毕后刷新页面，加载正式的结构化历史记录
     st.rerun()

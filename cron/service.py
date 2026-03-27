@@ -1,4 +1,7 @@
 """Cron service for scheduling agent tasks."""
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent))
 
 import asyncio
 import json
@@ -7,9 +10,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine
-
 from utils.logger_handler import logger
-
 from cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
 
 def _now_ms() -> int:
@@ -75,13 +76,14 @@ class CronService:
         self._last_mtime: float = 0.0
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _load_store(self) -> CronStore:
         """Load jobs from disk. Reloads automatically if file was modified externally."""
         if self._store and self.store_path.exists():
             mtime = self.store_path.stat().st_mtime
             if mtime != self._last_mtime:
-                logger.info("Cron: jobs.json modified externally, reloading")
+                logger.info(f"Cron: jobs.json modified externally, reloading")
                 self._store = None
         if self._store:
             return self._store
@@ -130,7 +132,7 @@ class CronService:
                     ))
                 self._store = CronStore(jobs=jobs)
             except Exception as e:
-                logger.warning("Failed to load cron store: {}", e)
+                logger.warning(f"Failed to load cron store: {e}")
                 self._store = CronStore()
         else:
             self._store = CronStore()
@@ -193,12 +195,13 @@ class CronService:
     
     async def start(self) -> None:
         """Start the cron service."""
+        self._loop = asyncio.get_running_loop()
         self._running = True
         self._load_store()
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
-        logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
+        logger.info(f"Cron service started with {len(self._store.jobs if self._store else [])} jobs")
 
     def stop(self) -> None:
         """Stop the cron service."""
@@ -226,6 +229,19 @@ class CronService:
 
     def _arm_timer(self) -> None:
         """Schedule the next timer tick."""
+        if not self._running or not self._loop:
+            return
+
+        try:
+            asyncio.get_running_loop()
+            # We're in the event loop thread — schedule directly
+            self._schedule_tick()
+        except RuntimeError:
+            # We're in a different thread (e.g. tool executor) — use thread-safe call
+            self._loop.call_soon_threadsafe(self._schedule_tick)
+
+    def _schedule_tick(self) -> None:
+        """Create the next timer task. Must be called from the event loop thread."""
         if self._timer_task:
             self._timer_task.cancel()
 
@@ -233,15 +249,14 @@ class CronService:
         if not next_wake or not self._running:
             return
 
-        delay_ms = max(0, next_wake - _now_ms())
-        delay_s = delay_ms / 1000
+        delay_s = max(0, next_wake - _now_ms()) / 1000
 
         async def tick():
             await asyncio.sleep(delay_s)
             if self._running:
                 await self._on_timer()
 
-        self._timer_task = asyncio.create_task(tick())
+        self._timer_task = self._loop.create_task(tick())
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
@@ -264,7 +279,7 @@ class CronService:
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
         start_ms = _now_ms()
-        logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        logger.debug(f"Cron: executing job '{job.name}' ({job.id})")
 
         try:
             if self.on_job:
@@ -272,12 +287,12 @@ class CronService:
 
             job.state.last_status = "ok"
             job.state.last_error = None
-            logger.info("Cron: job '{}' completed", job.name)
+            logger.debug(f"Cron: job '{job.name}' completed" )
 
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
-            logger.error("Cron: job '{}' failed: {}", job.name, e)
+            logger.error("Cron: job '{job.name}' failed: {e}" )
 
         end_ms = _now_ms()
         job.state.last_run_at_ms = start_ms
@@ -319,6 +334,7 @@ class CronService:
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
+        kind: str = "agent_turn"
     ) -> CronJob:
         """Add a new job."""
         store = self._load_store()
@@ -331,7 +347,7 @@ class CronService:
             enabled=True,
             schedule=schedule,
             payload=CronPayload(
-                kind="agent_turn",
+                kind=kind,
                 message=message,
                 deliver=deliver,
                 channel=channel,
@@ -347,7 +363,7 @@ class CronService:
         self._save_store()
         self._arm_timer()
 
-        logger.info("Cron: added job '{}' ({})", name, job.id)
+        logger.debug(f"Cron: added job '{name}' ({job.id})")
         return job
 
     def remove_job(self, job_id: str) -> bool:
@@ -360,7 +376,7 @@ class CronService:
         if removed:
             self._save_store()
             self._arm_timer()
-            logger.info("Cron: removed job {}", job_id)
+            logger.debug(f"Cron: removed job {job_id}")
 
         return removed
 

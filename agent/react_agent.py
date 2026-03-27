@@ -16,11 +16,11 @@ from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
 from utils.logger_handler import logger
 from model.factory import chat_model,memory_model
+from agent.tools.cron import cron_state
 
 # 内部导入心跳模块
 from agent.heartbeat.service import HeartbeatService
 from agent.heartbeat.dashscope import DashScopeProvider
-
 
 class ReactAgent:
     def __init__(self):
@@ -43,6 +43,11 @@ class ReactAgent:
 
         # 3. ✅ 核心：自动初始化并启动心跳（封装在类内部）
         await self._init_heartbeat()
+
+        # 4. 启动 Cron 定时任务服务
+        await cron_state._cron.start()
+        # 5. 绑定 Agent 回调，让 Cron 能真正调用 Agent 执行任务
+        cron_state.set_agent_callback(self.execute_background_task)
 
     def _build_agent(self):
         tools = get_all_tools()
@@ -85,7 +90,7 @@ class ReactAgent:
             workspace=workspace,
             provider=DashScopeProvider(),
             model="qwen-max",
-            interval_s=30 * 60,  # 30分钟一次
+            interval_s= 30 * 60,  # 30分钟一次
             on_execute=on_heartbeat_execute,
             on_notify=on_heartbeat_notify,
         )
@@ -94,12 +99,18 @@ class ReactAgent:
         await self.heartbeat.start()
         logger.info("[ReactAgent] Heartbeat 服务启动成功")
 
+
     # ──────────────────────────────────────────
     # ✅ 流式输出
     # ──────────────────────────────────────────
 
     async def execute_stream(self, query: str, thread_id: str = "default"):
         """异步执行查询，并返回流式输出。"""
+        
+        # 👉 【新增代码】每次 Agent 运行前，更新 Cron 的上下文
+        # 渠道标记为 "terminal"，接收者标记为当前的 thread_id
+        cron_state.set_context(channel="terminal", chat_id=thread_id)
+
         input_dict = {"messages": [{"role": "user", "content": query}]}
         config = {"configurable": {"thread_id": thread_id}}
     
@@ -157,7 +168,14 @@ class ReactAgent:
 
     async def execute_background_task(self, task_query: str, thread_id: str = "heartbeat_daemon") -> str:
         """接收心跳服务传来的任务，执行并返回完整结果。"""
+        
+        # 👉 【新增代码】为后台任务更新 Cron 上下文
+        # 渠道标记为 "heartbeat"，接收者标记为当前的 thread_id
+        cron_state.set_context(channel="heartbeat", chat_id=thread_id)
+
         full_response = ""
+        # 这里调用的 execute_stream 内部也会更新上下文，
+        # 但显式在这里写明逻辑更清晰，或者保持原样也可。
         async for chunk in self.execute_stream(task_query, thread_id=thread_id):
             full_response += chunk
         return full_response
@@ -167,6 +185,7 @@ class ReactAgent:
         if self.heartbeat:
             self.heartbeat.stop()
             logger.info("[ReactAgent] HeartbeatService 已自动关闭")
+        cron_state._cron.stop()
         if self.conn:
             await self.conn.close()
 
@@ -184,7 +203,7 @@ async def main():
 
     try:
         while True:
-            user_input = input("\n🧑 Young: ").strip()
+            user_input = (await asyncio.to_thread(input, "\n🧑 Young: ")).strip()
 
             if not user_input:
                 continue

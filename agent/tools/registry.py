@@ -13,7 +13,8 @@ from .agent_tools import (
     read_file,
     write_file,
     edit_file,
-    get_skill_details
+    get_skill_details,
+    cron_tool
 )
 
 class ToolRegistry:
@@ -34,7 +35,8 @@ class ToolRegistry:
             read_file,
             write_file,
             edit_file,
-            get_skill_details
+            get_skill_details,
+            cron_tool
             ]
 
         self._mcp_tools: List[BaseTool] = []
