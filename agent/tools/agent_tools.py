@@ -1,10 +1,8 @@
-import json
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 import subprocess
-import yaml
 from langchain_core.tools import tool
 from utils.logger_handler import logger
 from utils.path_tool import get_abs_path
@@ -65,7 +63,7 @@ def bash_exec(command: str, timeout: int = 60) -> str:
     except Exception as e:
         return f"[错误] {e}"
 
-@tool(description="读取文件内容。path 为相对项目根目录的路径或绝对路径。")
+@tool(description="读取文件内容。输入的 path 为相对项目根目录的路径或绝对路径。")
 def read_file(path: str) -> str:
     """Read a file and return its text content."""
     logger.info(f"[read_file] 读取: {path}")
@@ -125,3 +123,39 @@ def get_skill_details(skill_name: str) -> str:
     except Exception as e:
         logger.error(f"[get_skill_details]读取技能时发生异常： {e}")
         return f"错误：在读取技能 '{skill_name}' 的说明文件时发生异常。"
+    """将 HEARTBEAT.md Active Tasks 中匹配的任务移动到 Completed 区块。"""
+    logger.info(f"[complete_heartbeat_task] 完成/移除心跳任务: {task_keyword}")
+    try:
+        content = _read_heartbeat()
+        
+        active_marker = "<!-- Add your periodic tasks below this line -->"
+        completed_marker = "<!-- Move completed tasks here or delete them -->"
+        
+        if active_marker not in content or completed_marker not in content:
+            return "[错误] HEARTBEAT.md 格式不符合预期，缺少必要锚点。"
+        
+        lines = content.splitlines()
+        matched_line = None
+        new_lines = []
+        
+        # 找到并移除匹配行
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("- ") and task_keyword.lower() in stripped.lower():
+                matched_line = stripped
+            else:
+                new_lines.append(line)
+        
+        if not matched_line:
+            return f"[提示] 未在 Active Tasks 中找到包含 '{task_keyword}' 的任务。"
+        
+        # 将匹配的任务插入 Completed 区块
+        new_content = "\n".join(new_lines)
+        new_content = new_content.replace(
+            completed_marker,
+            f"{completed_marker}\n{matched_line}"
+        )
+        _write_heartbeat(new_content)
+        return f"✅ 已将任务移至 Completed：{matched_line}"
+    except Exception as e:
+        return f"[错误] 操作失败: {e}"

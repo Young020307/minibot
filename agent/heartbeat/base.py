@@ -9,7 +9,6 @@ from typing import Any
 
 from utils.logger_handler import logger
 
-
 @dataclass
 class ToolCallRequest:
     """A tool call request from the LLM."""
@@ -318,11 +317,15 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
-        """Call chat() with retry on transient provider failures.
+        """
+        带自动重试、带默认参数、带错误处理的 AI 聊天调用函数，
+        专门用来稳定调用大模型（LLM）
 
-        Parameters default to ``self.generation`` when not explicitly passed,
-        so callers no longer need to thread temperature / max_tokens /
-        reasoning_effort through every layer.
+        针对临时性的模型服务故障，对 chat () 方法进行重试调用。
+
+        参数在未显式传递时，默认使用 self.generation 中的配置，
+        因此调用方无需在每一层代码中手动传递 temperature、max_tokens、
+        reasoning_effort 等参数。
         """
         if max_tokens is self._SENTINEL:
             max_tokens = self.generation.max_tokens

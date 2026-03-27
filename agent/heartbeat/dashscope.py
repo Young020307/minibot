@@ -10,7 +10,7 @@ from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 # 导入基类和响应类 
-from model.base import LLMProvider, LLMResponse 
+from agent.heartbeat.base import LLMProvider, LLMResponse 
 
 class DashScopeProvider(LLMProvider):
     """基于 LangChain ChatTongyi 实现的通义千问 Provider。"""
@@ -60,7 +60,7 @@ class DashScopeProvider(LLMProvider):
         print(f"\n[大模型真实回答] 文本内容: {ai_msg.content}")
         print(f"[大模型调用的工具] {getattr(ai_msg, 'tool_calls', '没有调用工具')}\n")
         # 👉 关键点 2：把模型吐出来的虚拟工具参数，原样装回 LLMResponse 给心跳服务
-        from model.base import ToolCallRequest
+        from base import ToolCallRequest
         parsed_tool_calls = []
         if hasattr(ai_msg, "tool_calls") and ai_msg.tool_calls:
             for tc in ai_msg.tool_calls:

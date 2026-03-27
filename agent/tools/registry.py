@@ -13,7 +13,7 @@ from .agent_tools import (
     read_file,
     write_file,
     edit_file,
-    get_skill_details,
+    get_skill_details
 )
 
 class ToolRegistry:
@@ -34,8 +34,8 @@ class ToolRegistry:
             read_file,
             write_file,
             edit_file,
-            get_skill_details,# 按需加载 skill 详情
-        ]
+            get_skill_details
+            ]
 
         self._mcp_tools: List[BaseTool] = []
         self._last_mcp_config_hash = None

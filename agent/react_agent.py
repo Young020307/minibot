@@ -3,91 +3,123 @@ import asyncio
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from langchain.messages import AIMessageChunk
-from langchain_core.messages import AIMessage
 
+import aiosqlite
 
-import sqlite3
-
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain.agents import create_agent 
-from langchain.agents.middleware import TodoListMiddleware
-from langchain.agents.middleware import SummarizationMiddleware, wrap_model_call
+from langchain_core.messages import AIMessage
+from langchain.messages import AIMessageChunk
+from langchain.agents.middleware import TodoListMiddleware,SummarizationMiddleware
+
 from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
 from utils.logger_handler import logger
-from model.factory import chat_model
-from model.factory import memory_model
+from model.factory import chat_model,memory_model
+
+# 内部导入心跳模块
+from agent.heartbeat.service import HeartbeatService
+from agent.heartbeat.dashscope import DashScopeProvider
+
 
 class ReactAgent:
     def __init__(self):
-        self.conn = sqlite3.connect(
-            str(Path(__file__).resolve().parent.parent / "checkpoints.db"),
-            check_same_thread=False,
-        )
-        self.checkpointer = SqliteSaver(self.conn)
+        self.conn = None
+        self.checkpointer = None
+        self.agent = None
         self.context_builder = ContextBuilder()
+        self.heartbeat = None  # 心跳服务实例（内部自动创建）
+
+    async def initialize(self):
+        """异步初始化：数据库 + Agent + 自动创建并启动心跳服务"""
+        # 1. 初始化数据库和检查点
+        db_path = str(Path(__file__).resolve().parent.parent / "checkpoints.db")
+        self.conn = await aiosqlite.connect(db_path)
+        self.checkpointer = AsyncSqliteSaver(self.conn)
+        await self.checkpointer.setup()
+        
+        # 2. 构建 Agent
         self._build_agent()
+
+        # 3. ✅ 核心：自动初始化并启动心跳（封装在类内部）
+        await self._init_heartbeat()
 
     def _build_agent(self):
         tools = get_all_tools()
         logger.info(f"[ReactAgent] 已加载工具: {[t.name for t in tools]}")
 
-        # @wrap_model_call
-        # def dynamic_prompt_middleware(request: ModelRequest, handler) -> ModelResponse:
-        #     """每次调用大模型前，动态注入最新的 System Prompt"""
-        #     # 通过实例调用 build_system_prompt
-        #     system_prompt = self.context_builder.build_system_prompt()
-        #     # 将动态生成的系统提示词插入到消息列表的最前面
-        #     request.messages = [SystemMessage(content=system_prompt)] + request.messages
-        #     return handler(request)
-
         # 上下文总结中间件
-        Summarization_Middleware= SummarizationMiddleware(
-        model=memory_model,
-        max_tokens_before_summary=2000,
-        messages_to_keep=10)
+        Summarization_Middleware = SummarizationMiddleware(
+            model=memory_model,
+            max_tokens_before_summary=2000,
+            messages_to_keep=10
+        )
 
         self.agent = create_agent(
             model=chat_model,  
             tools=tools,
-            # 对话历史
             checkpointer=self.checkpointer,
-            # 中间件
-            middleware=[Summarization_Middleware,
-                        TodoListMiddleware()],       
+            middleware=[Summarization_Middleware, TodoListMiddleware()],       
             system_prompt=self.context_builder.build_system_prompt(),
         )
         logger.info("[ReactAgent] Agent 构建完成")
 
     # ──────────────────────────────────────────
-    # 流式输出
+    # ✅ 心跳服务封装：内部自动创建、绑定、启动
+    # ──────────────────────────────────────────
+    async def _init_heartbeat(self):
+        """内部方法：自动创建心跳服务并绑定回调 + 启动"""
+        workspace = Path(__file__).resolve().parent.parent
+
+        # 心跳执行回调（闭包绑定当前 agent 实例）
+        async def on_heartbeat_execute(tasks: str) -> str:
+            logger.info(f"👉 收到心跳任务，转交 Agent 执行: {tasks}")
+            return await self.execute_background_task(tasks, thread_id="background_tasks")
+
+        # 心跳通知回调
+        async def on_heartbeat_notify(response: str):
+            logger.info(f"🔔 【系统通知】Agent 完成了后台任务:\n{response}")
+
+        # 创建心跳实例
+        self.heartbeat = HeartbeatService(
+            workspace=workspace,
+            provider=DashScopeProvider(),
+            model="qwen-max",
+            interval_s=30 * 60,  # 30分钟一次
+            on_execute=on_heartbeat_execute,
+            on_notify=on_heartbeat_notify,
+        )
+
+        # 启动心跳
+        await self.heartbeat.start()
+        logger.info("[ReactAgent] Heartbeat 服务启动成功")
+
+    # ──────────────────────────────────────────
+    # ✅ 流式输出
     # ──────────────────────────────────────────
 
-    def execute_stream(self, query: str, thread_id: str = "default"):
+    async def execute_stream(self, query: str, thread_id: str = "default"):
+        """异步执行查询，并返回流式输出。"""
         input_dict = {"messages": [{"role": "user", "content": query}]}
         config = {"configurable": {"thread_id": thread_id}}
     
-        for chunk, metadata in self.agent.stream(
+        async for chunk, metadata in self.agent.astream(
                 input_dict,
                 stream_mode="messages",
-                context={"report": False},
                 config=config
         ):
-            #print(f"[DEBUG] chunk type: {type(chunk)}, content: {chunk.content if hasattr(chunk, 'content') else 'N/A'}", file=sys.stderr)
-            # chunk 在这里直接是一个 MessageChunk 对象
             if isinstance(chunk, (AIMessage, AIMessageChunk)) and chunk.content:
                 yield chunk.content
 
     # ──────────────────────────────────────────
-    # 历史 / 线程管理
+    # ✅ 会话记忆 / 线程管理
     # ──────────────────────────────────────────
 
-    def get_history(self, thread_id: str) -> list[dict]:
-        """返回指定线程的消息历史。"""
+    async def get_history(self, thread_id: str) -> list[dict]:
+        """获取指定线程的消息历史。"""
         config = {"configurable": {"thread_id": thread_id}}
         try:
-            state = self.agent.get_state(config)
+            state = await self.agent.aget_state(config)
             messages = state.values.get("messages", [])
             result = []
             for m in messages:
@@ -101,90 +133,81 @@ class ReactAgent:
             logger.error(f"[ReactAgent] 获取历史失败: {e}")
             return []
 
-    def get_all_threads(self) -> list[str]:
+    async def get_all_threads(self) -> list[str]:
         """返回所有已存在的 thread_id 列表。"""
-        cursor = self.conn.cursor()
         try:
-            cursor.execute(
+            cursor = await self.conn.execute(
                 "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
             )
-            return [row[0] for row in cursor.fetchall()]
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
         except Exception as e:
             logger.error(f"[ReactAgent] 获取线程列表失败: {e}")
             return []
 
-    def delete_thread(self, thread_id: str):
+    async def delete_thread(self, thread_id: str):
         """删除指定线程的所有检查点。"""
-        cursor = self.conn.cursor()
         try:
-            cursor.execute(
-                "DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,)
-            )
-            cursor.execute(
-                "DELETE FROM writes WHERE thread_id = ?", (thread_id,)
-            )
-            self.conn.commit()
+            await self.conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+            await self.conn.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
+            await self.conn.commit()
             logger.info(f"[ReactAgent] 已删除线程: {thread_id}")
         except Exception as e:
             logger.error(f"[ReactAgent] 删除线程失败: {e}")
 
     async def execute_background_task(self, task_query: str, thread_id: str = "heartbeat_daemon") -> str:
-        """
-        接收心跳服务传来的任务，执行并返回完整结果。
-        这里默认使用一个专门的 thread_id ("heartbeat_daemon")，
-        避免后台任务污染用户正常对话的上下文历史。
-        """
-        def _run_sync():
-            # 收集流式输出的片段，组合成完整字符串
-            full_response = ""
-            for chunk in self.execute_stream(task_query, thread_id=thread_id):
-                full_response += chunk
-            return full_response
+        """接收心跳服务传来的任务，执行并返回完整结果。"""
+        full_response = ""
+        async for chunk in self.execute_stream(task_query, thread_id=thread_id):
+            full_response += chunk
+        return full_response
 
-        # 因为你的 execute_stream 是同步的生成器，
-        # 为了不阻塞 HeartbeatService 的 async 事件循环，我们把它放到线程中运行
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _run_sync)
-        return result
-   
-if __name__ == "__main__":
+    async def close(self):
+        """关闭心跳服务 + 数据库连接"""
+        if self.heartbeat:
+            self.heartbeat.stop()
+            logger.info("[ReactAgent] HeartbeatService 已自动关闭")
+        if self.conn:
+            await self.conn.close()
+
+
+async def main():
+    # ✅ 实例化 + 初始化，心跳自动绑定启动
     agent = ReactAgent()
+    await agent.initialize()
 
-    # 设定一个固定的 thread_id，这样它就能记住你们前几轮聊了啥
-    thread_id = "terminal_session_01" 
+    thread_id = "terminal_session_01"
     print("==================================================")
     print("🤖 你的专属助手已启动！")
     print("💡 提示：输入 'exit' 或按下 Ctrl + C 即可结束对话。")
     print("==================================================")
 
-    while True:
-        try:
-            # 1. 获取输入
+    try:
+        while True:
             user_input = input("\n🧑 Young: ").strip()
-            
-            # 如果不小心直接敲了回车，就跳过这次循环
+
             if not user_input:
                 continue
-                
-            # 如果输入 exit 或 quit，正常退出
+
             if user_input.lower() in ['exit', 'quit']:
                 print("\n👋 收到!助手已下线，咱们下次聊。")
                 break
 
-            # 2. 调用 Agent 并流式输出回复
             print("🤖 助手: ", end="", flush=True)
-            for chunk in agent.execute_stream(user_input, thread_id=thread_id):
-                # 逐字打印 AI 的回复
-                print(chunk, end="", flush=True)
-            
-            # 这一轮回答完了，打个换行符，准备迎接下一轮
-            print() 
 
-        except KeyboardInterrupt:
-            # 捕捉咱们键盘按下的 Ctrl + C (终端标准中断按键)
-            print("\n\n🛑 检测到中断信号 (Ctrl+C)，强制退出对话。拜拜！")
-            break
-            
-        except Exception as e:
-            # 万一代码或者 API 报错了，别直接崩溃，把错误打出来，还能继续聊
-            print(f"\n❌ 哎呀，出错了: {e}")
+            async for chunk in agent.execute_stream(user_input, thread_id=thread_id):
+                print(chunk, end="", flush=True)
+
+            print()
+
+    except KeyboardInterrupt:
+        print("\n\n🛑 检测到中断信号 (Ctrl+C)，强制退出对话。拜拜！")
+    except Exception as e:
+        import traceback
+        print(f"\n❌ 哎呀，出错了: {e}")
+        traceback.print_exc()
+    finally:
+        await agent.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())

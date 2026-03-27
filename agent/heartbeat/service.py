@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from utils.logger_handler import logger
 
 if TYPE_CHECKING:
-    from model.base import LLMProvider
+    from base import LLMProvider
 
+# 虚拟心跳工具
 _HEARTBEAT_TOOL = [
     {
         "type": "function",
@@ -42,15 +43,15 @@ _HEARTBEAT_TOOL = [
 
 class HeartbeatService:
     """
-    Periodic heartbeat service that wakes the agent to check for tasks.
-
-    Phase 1 (decision): reads HEARTBEAT.md and asks the LLM — via a virtual
-    tool call — whether there are active tasks.  This avoids free-text parsing
-    and the unreliable HEARTBEAT_OK token.
-
-    Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
-    ``on_execute`` callback runs the task through the full agent loop and
-    returns the result to deliver.
+    周期性心跳服务：唤醒智能体以检查待执行任务
+    第一阶段（决策阶段）：
+        读取 HEARTBEAT.md 文件，
+        并通过虚拟工具调用向大语言模型（LLM）询问是否存在活跃任务。
+        该方案规避了自由文本解析的问题，同时摒弃了不可靠的 HEARTBEAT_OK 标记位。
+    第二阶段（执行阶段）：
+        仅当第一阶段返回 run 时触发。
+        on_execute 回调函数会驱动智能代理完整执行任务流程，
+        并将执行结果返回用于后续推送。
     """
 
     def __init__(
@@ -75,10 +76,11 @@ class HeartbeatService:
 
     @property
     def heartbeat_file(self) -> Path:
+        """返回HEARTBEAT.md 文件的路径"""
         return self.workspace / "templates" / "HEARTBEAT.md"
 
     def _read_heartbeat_file(self) -> str | None:
-        print(f"\n[核对路径] Python 实际寻找的路径是: {self.heartbeat_file.absolute()}\n")
+        """读取 HEARTBEAT.md 文件并返回内容。"""
         if self.heartbeat_file.exists():
             try:
                 return self.heartbeat_file.read_text(encoding="utf-8")
@@ -87,9 +89,9 @@ class HeartbeatService:
         return None
 
     async def _decide(self, content: str) -> tuple[str, str]:
-        """Phase 1: ask LLM to decide skip/run via virtual tool call.
-
-        Returns (action, tasks) where action is 'skip' or 'run'.
+        """
+        第一阶段：通过虚拟工具调用，让大语言模型（LLM）决策是跳过任务还是执行任务
+        返回值为 (动作，任务内容)，其中动作取值为'skip'（跳过）或 'run'（执行）.
         """
         from utils.helpers import current_time_str
 
@@ -113,7 +115,7 @@ class HeartbeatService:
         return args.get("action", "skip"), args.get("tasks", "")
 
     async def start(self) -> None:
-        """Start the heartbeat service."""
+        """开始运行 heartbeat 服务."""
         if not self.enabled:
             logger.info("Heartbeat disabled")
             return
@@ -179,7 +181,7 @@ class HeartbeatService:
             logger.exception(f"Heartbeat execution failed")
 
     async def trigger_now(self) -> str | None:
-        """Manually trigger a heartbeat."""
+        """人为触发一次 heartbeat 任务."""
         content = self._read_heartbeat_file()
         if not content:
             return None

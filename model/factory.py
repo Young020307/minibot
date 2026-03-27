@@ -13,7 +13,7 @@ class BaseModelFactory(ABC):
 
 class ChatModelFactory(BaseModelFactory):
     def generator(self) -> BaseChatModel:
-        return ChatTongyi(model=agent_conf["chat_model_name"])
+        return ChatTongyi(model=agent_conf["chat_model_name"],streaming=True)
 
 class MemoryModelFactory(BaseModelFactory):
     def generator(self) -> BaseChatModel:
