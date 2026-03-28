@@ -21,7 +21,8 @@ class DashScopeProvider(LLMProvider):
             raise ValueError("⚠️ 缺少 DASHSCOPE_API_KEY 环境变量！")
 
     def get_default_model(self) -> str:
-        return "qwen-max"
+        from utils.config_handler import agent_conf
+        return agent_conf.get("heartbeat_model_name")
 
     async def chat(
         self,

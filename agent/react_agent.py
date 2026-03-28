@@ -91,7 +91,6 @@ class ReactAgent:
         self.heartbeat = HeartbeatService(
             workspace=workspace,
             provider=DashScopeProvider(),
-            model="qwen-max",
             interval_s= 30 * 60,  # 30分钟一次
             on_execute=on_heartbeat_execute,
             on_notify=on_heartbeat_notify,

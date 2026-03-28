@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
+from heartbeat.dashscope import DashScopeProvider
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import asyncio
@@ -57,8 +59,7 @@ class HeartbeatService:
     def __init__(
         self,
         workspace: Path,
-        provider: LLMProvider,
-        model: str,
+        provider: DashScopeProvider,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
@@ -66,7 +67,6 @@ class HeartbeatService:
     ):
         self.workspace = workspace
         self.provider = provider
-        self.model = model
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.interval_s = interval_s
@@ -105,7 +105,7 @@ class HeartbeatService:
                 )},
             ],
             tools=_HEARTBEAT_TOOL,
-            model=self.model,
+            model= None,
         )
 
         if not response.has_tool_calls:
@@ -170,7 +170,7 @@ class HeartbeatService:
 
                 if response:
                     should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
+                        response, tasks, self.provider, self.provider.get_default_model(),
                     )
                     if should_notify and self.on_notify:
                         logger.info(f"Heartbeat: completed, delivering response")
