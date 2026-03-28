@@ -125,7 +125,7 @@ def get_skill_details(skill_name: str) -> str:
         logger.error(f"[get_skill_details]读取技能时发生异常： {e}")
         return f"错误：在读取技能 '{skill_name}' 的说明文件时发生异常。"
 
-from agent.tools.cron import cron_state
+from cron.cron import cron_state
 @tool()
 def cron_tool(
     action: str,

@@ -1,48 +1,43 @@
-import asyncio
-from pathlib import Path
-from utils.logger_handler import logger
-
 from agent.react_agent import ReactAgent
-from agent.heartbeat.service import HeartbeatService
-from agent.heartbeat.dashscope import DashScopeProvider
+import asyncio
 
 async def main():
-    # 1. 初始化 ReactAgent (执行器)
+    # ✅ 实例化 + 初始化，心跳自动绑定启动
     agent = ReactAgent()
-    logger.info("ReactAgent 启动成功。")
+    await agent.initialize()
 
-    # 2. 定义回调函数：当心跳服务发现任务时，交由 Agent 执行
-    async def on_heartbeat_execute(tasks: str) -> str:
-        logger.info(f"👉 收到心跳任务，转交 Agent 执行: {tasks}")
-        # 调用 ReactAgent 中执行后台任务的方法
-        response = await agent.execute_background_task(tasks, thread_id="background_tasks")
-        return response
+    thread_id = "terminal_session_01"
+    print("==================================================")
+    print("🤖 你的专属助手已启动！")
+    print("💡 提示：输入 'exit' 或按下 Ctrl + C 即可结束对话。")
+    print("==================================================")
 
-    # 3. 定义通知函数：Agent 觉得需要通知时，发往哪里？
-    async def on_heartbeat_notify(response: str):
-        # 这里可以接入微信、钉钉、Telegram 或前端 WebSocket 弹窗
-        logger.info(f"🔔 【系统通知】 Agent 完成了后台任务:\n{response}")
-
-    # 4. 初始化心跳服务 (触发器)
-    heartbeat = HeartbeatService(
-        workspace=Path(__file__).resolve().parent, # 指向工作区
-        provider=DashScopeProvider(), # 替换为 HeartbeatService 需要的 Provider 实例
-        model="qwen-max",             # 替换为模型名
-        interval_s= 5 ,          # 例如 30 分钟检查一次
-        on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify
-    )
-
-    # 5. 启动心跳服务 (后台运行)
-    await heartbeat.start()
-
-    # 保持主程序运行 
     try:
         while True:
-            await asyncio.sleep(1)
+            user_input = (await asyncio.to_thread(input, "\n😃 Young: ")).strip()
+
+            if not user_input:
+                continue
+
+            if user_input.lower() in ['exit', 'quit']:
+                print("\n👋 收到!助手已下线，咱们下次聊。")
+                break
+
+            print("🤖 助手: ", end="", flush=True)
+
+            async for chunk in agent.execute_stream(user_input, thread_id=thread_id):
+                print(chunk, end="", flush=True)
+
+            print()
+
     except KeyboardInterrupt:
-        heartbeat.stop()
-        logger.info("系统关闭。")
+        print("\n\n🛑 检测到中断信号 (Ctrl+C)，强制退出对话。拜拜！")
+    except Exception as e:
+        import traceback
+        print(f"\n❌ 哎呀，出错了: {e}")
+        traceback.print_exc()
+    finally:
+        await agent.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -2,7 +2,7 @@
 import os
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from typing import Any
 
@@ -10,7 +10,7 @@ from langchain_community.chat_models.tongyi import ChatTongyi
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 # 导入基类和响应类 
-from agent.heartbeat.base import LLMProvider, LLMResponse 
+from heartbeat.base import LLMProvider, LLMResponse 
 
 class DashScopeProvider(LLMProvider):
     """基于 LangChain ChatTongyi 实现的通义千问 Provider。"""

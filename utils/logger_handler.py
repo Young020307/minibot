@@ -18,10 +18,9 @@ DEFAULT_LOG_FORMAT = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
 )
 
-
 def get_logger(
         name: str = "agent",
-        console_level: int = logging.INFO,
+        console_level: int = logging.WARNING,
         file_level: int = logging.DEBUG,
         log_file = None,
 ) -> logging.Logger:
@@ -51,13 +50,5 @@ def get_logger(
 
     return logger
 
-
 # 快捷获取日志器
 logger = get_logger()
-
-
-if __name__ == '__main__':
-    logger.info("信息日志")
-    logger.error("错误日志")
-    logger.warning("警告日志")
-    logger.debug("调试日志")
