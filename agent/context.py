@@ -1,15 +1,13 @@
 import sys
 from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import yaml
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-
 import json
 import base64
 import mimetypes
 import platform
 import datetime
-from pathlib import Path
 from typing import Any, List, Dict
 
 from utils.helpers import get_abs_path
@@ -18,7 +16,7 @@ from utils.logger_handler import logger
 class ContextBuilder:
     """构建 Agent 的完整上下文（包括 System Prompt 和多轮对话 Messages）"""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+    PROMPT_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
     def __init__(self, workspace_path: str = None):
@@ -28,40 +26,43 @@ class ContextBuilder:
         self.templates_dir = Path(get_abs_path("templates"))
 
     def build_system_prompt(self) -> str:
-        """从身份、核心文件、记忆和技能中构建系统提示词"""
-        parts = [self._get_identity()]
+        """从身份、记忆和技能中构建系统提示词"""
+        system_prompt = []
 
-        # 👉 1. 加载长期事实记忆
-        long_term_memory = self._get_long_term_memory()
-        if long_term_memory:
-            parts.append(long_term_memory)
-
-        # 2. 加载基础模板 (SOUL, AGENTS, etc.)
+        # 1. 加载基础模板 (SOUL, AGENTS, etc.)
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
-            parts.append(bootstrap)
+            system_prompt.append(bootstrap)
 
-        # 3. 注入技能摘要索引
+        # 2. 加载运行环境信息：系统类型、架构、Python 版本
+        system_prompt.append(self._get_identity())
+
+        # 3. 加载长期事实记忆(MEMORY.md)
+        long_term_memory = self._get_long_term_memory()
+        if long_term_memory:
+            system_prompt.append(long_term_memory)
+
+        # 4. 注入技能摘要索引
         skills_summary = self._get_skills_summary()
         if skills_summary:
-            parts.append(skills_summary)
+            system_prompt.append(skills_summary)
             
-        return "\n\n---\n\n".join(parts)
+        return "\n\n---\n\n".join(system_prompt)
 
     def _get_long_term_memory(self) -> str:
-        """读取本地持久化记忆文件并注入 System Prompt"""
-        # 👉 确保这里的路径与 MemoryManager 中一致
+        """读取本地持久化记忆文件"""
+        # 确保这里的路径与 MemoryManager 中一致
         memory_file = Path(r"C:\Users\Younson\Desktop\Agent\minibot\templates\memory\MEMORY.md")
         
         if memory_file.exists():
             try:
-                # 因为你的模板自带了 "# Long-term Memory" 标题，所以直接拼接内容即可
+                # 因为模板自带了 "# Long-term Memory" 标题，所以直接拼接内容即可
                 content = memory_file.read_text(encoding="utf-8").strip()
                 return content
             except Exception as e:
                 logger.error(f"[ContextBuilder] 读取 MEMORY.md 失败: {e}")
                 
-        # 降级：如果还没生成，返回空提示
+        # 如果还没生成，返回空提示
         return "# Long-term Memory\n\n(No explicit memories recorded yet.)"
 
     def _get_identity(self) -> str:
@@ -81,29 +82,19 @@ class ContextBuilder:
 - You are running on a POSIX system. Prefer UTF-8 and standard shell tools.
 - Use standard bash commands for file operations when appropriate."""
 
-        return f"""# AI Assistant
-
-You are a highly capable AI assistant.
-
-## Runtime
+        return f"""## Runtime
 {runtime}
 
 ## Workspace
 Your current workspace is: {workspace_str}
 
 {platform_policy}
-
-## Guidelines
-- State intent before tool calls, but NEVER predict results before receiving them.
-- Before modifying a file, read it first. Do not assume files exist.
-- If a tool call fails, analyze the error before retrying.
-- Reply directly with text for conversations.
 """
 
     def _load_bootstrap_files(self) -> str:
         """从 templates 目录加载核心 Markdown 文件"""
         parts = []
-        for filename in self.BOOTSTRAP_FILES:
+        for filename in self.PROMPT_FILES:
             file_path = self.templates_dir / filename
             if file_path.exists():
                 try:
@@ -128,20 +119,28 @@ Your current workspace is: {workspace_str}
         # 遍历 skills 下的每一个子目录
         for skill_folder in skills_dir.iterdir():
             if skill_folder.is_dir():
-                # 在子目录下寻找第一个 .md 文件
-                md_files = list(skill_folder.glob("*.md"))
-                if not md_files:
+                # 👇 直接定位这个目录下的 SKILL.md 文件
+                skill_md = skill_folder / "SKILL.md"
+                # 👇 检查文件是否存在，不存在就跳过
+                if not skill_md.exists():
+                    logger.warning(f"[ContextBuilder] 技能 {skill_folder.name} 缺少 SKILL.md 文件")
                     continue
-                
-                skill_md = md_files[0]  # 取文件夹下的第一个 md 文件
-                skill_key = skill_folder.name  # 文件夹名作为 key
-                
+                # 👇 文件夹名作为 key
+                skill_key = skill_folder.name
+
                 try:
+                    # 读取文件全部内容
                     content = skill_md.read_text(encoding="utf-8")
                     # 检查并解析 YAML front-matter
                     if content.startswith("---"):
+                        # 把内容按 --- 切成 3 部分
+                        # 第1部分：空
+                        # 第2部分：YAML 配置（name、description 等）
+                        # 第3部分：正文内容
                         parts = content.split("---", 2)
+                        # 确保确实切为了 3 部分
                         if len(parts) >= 3:
+                            ## 把中间那段配置文本解析成 Python 字典
                             meta = yaml.safe_load(parts[1]) or {}
                             
                             # 组装技能信息
@@ -151,8 +150,7 @@ Your current workspace is: {workspace_str}
                                 "path": f"skills/{skill_key}/{skill_md.name}"
                             }
                 except Exception as e:
-                    # 假设 logger 已在外部定义
-                    print(f"[Error] 无法解析 {skill_md}: {e}")
+                    logger.warning(f"[ContextBuilder] 解析 {skill_md} 失败: {e}")
 
         # 将字典转换为 JSON 格式的字符串
         # ensure_ascii=False 保证中文正常显示，indent=4 增加可读性
@@ -225,3 +223,7 @@ Your current workspace is: {workspace_str}
             
         content_parts.append({"type": "text", "text": text})
         return content_parts
+    
+if __name__ == "__main__":
+    builder = ContextBuilder()
+    print(builder.build_system_prompt())

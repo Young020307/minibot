@@ -149,16 +149,14 @@ class CronToolManager:
         if self._cron.remove_job(job_id):
             return f"Removed job {job_id}"
         return f"Job {job_id} not found"
-    
+
 
 # 1. 初始化路径与状态管理器
-db_path = Path(__file__).resolve().parent.parent.parent / "cron_jobs.db"
+db_path = Path(__file__).resolve().parent.parent / "cron_jobs.json"
 from cron.types import CronJob
 
-# 2. 定义异步回调函数
-# 修复了引号问题，并确保逻辑严密
+# 2. 定义异步回调函数(解耦终端硬编码)
 async def on_cron_job_execute(job: CronJob) -> None:
-    # 注意：这里使用英文字符 "" 而不是中文 “”
     if job.payload.kind == "agent_turn" and cron_state._agent_callback:
         # 让 agent 真正执行任务（可调用工具、搜索等）
         token = cron_state.set_cron_context(True)
@@ -167,13 +165,16 @@ async def on_cron_job_execute(job: CronJob) -> None:
             result = await cron_state._agent_callback(job.payload.message)
             
             # 只有在需要交付且渠道为 terminal 时才打印
-            if job.payload.deliver and job.payload.channel == "terminal":
-                print(f"\n\n⏰ \033[93m[定时任务结果]: {result}\033[0m")
+            if job.payload.deliver:
+                # 无论什么渠道，先打印到终端方便开发调试
+                print(f"\n\n⏰ \033[93m[定时任务执行结果]: {result}\033[0m")
                 print("🧑 Young: ", end="", flush=True)
+        
+                # TODO: 如果未来接入了其他渠道，可以在这里根据 job.payload.channel 进行消息推送分发
         finally:
             cron_state.reset_cron_context(token)
             
-    elif job.payload.deliver and job.payload.channel == "terminal":
+    elif job.payload.deliver:
         # 纯提醒，不需要调用 agent
         message = job.payload.message
         print(f"\n\n⏰ \033[93m[定时提醒]: {message}\033[0m")

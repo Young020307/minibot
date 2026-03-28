@@ -14,11 +14,18 @@ from utils.logger_handler import logger
 from cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
 
 def _now_ms() -> int:
+    """获取当前时间ms."""
     return int(time.time() * 1000)
 
 
 def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
-    """Compute next run time in ms."""
+    """
+    根据传入的定时策略（schedule）和当前毫秒时间戳（now_ms）
+    计算任务的下一次执行时间（毫秒级），分3种策略处理：
+    - at 类型（固定时间点）：返回设定的时间戳（at_ms），若该时间已过期则返回 None；
+    - every 类型（固定间隔）：返回当前时间 + 设定间隔（every_ms），若间隔无效（≤0）则返回 None；
+    - cron 类型（cron 表达式）：结合时区（tz）解析cron表达式，计算下一次执行时间戳，解析失败则返回 None。
+    """
     if schedule.kind == "at":
         return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
 
@@ -47,7 +54,11 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
 
 
 def _validate_schedule_for_add(schedule: CronSchedule) -> None:
-    """Validate schedule fields that would otherwise create non-runnable jobs."""
+    """
+    添加任务前，校验定时策略（schedule）的合法性，避免创建无法执行的任务，抛出2种异常：
+    - 若设定了时区（tz），但定时类型不是 cron，抛出 ValueError；
+    - 若定时类型是 cron 且设定了时区，但时区不存在（无法通过 ZoneInfo 验证），抛出 ValueError。
+    """
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
 

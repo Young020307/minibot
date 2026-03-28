@@ -1,16 +1,16 @@
-from dataclasses import Field
 import sys
 from pathlib import Path
-from typing import Optional
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-import subprocess
 from langchain_core.tools import tool
+
 from utils.logger_handler import logger
 from utils.helpers import get_abs_path
 from utils.config_handler import api_conf
 
 from tavily import TavilyClient
+from typing import Optional
+import subprocess
 
 #初始化Tavily
 tavily_client = TavilyClient(api_key=api_conf.get("TAVILY_API_KEY"))
@@ -129,7 +129,7 @@ from cron.cron import cron_state
 @tool()
 def cron_tool(
     action: str,
-    message: str ="",
+    message: str = "",
     every_seconds: Optional[int] = None,
     delay_seconds: Optional[int] = None,
     cron_expr: Optional[str] = None,
@@ -139,24 +139,40 @@ def cron_tool(
     is_task: bool = False
 ) -> str:
     """
-    安排提醒与周期性任务。支持以下操作：添加、列出、删除。
+    执行提醒与周期性任务管理。支持添加、列出、删除、暂停和恢复任务。
+    
     Args:
-        action: Action to perform: 'add', 'list', or 'remove'.
-        message: Reminder message or task description (for add).
-        every_seconds: Interval in seconds (for recurring tasks). E.g. 3600 for every hour.
-        delay_seconds: Delay from now in seconds for one-time tasks. E.g. 1800 for 20 minutes from now.
-        cron_expr: Cron expression like '0 9 * * *' (for scheduled tasks like 'every day at 9am').
-        tz: IANA timezone for cron expressions (e.g. 'Asia/Shanghai').
-        at: ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). Use delay_seconds instead when user specifies a relative time.
-        job_id: Job ID (for remove).
+        action: 必须是以下之一：'add'(添加), 'list'(查看列表), 'remove'(删除), 'pause'(暂停任务), 'resume'(恢复任务)。
+        message: 提醒内容或具体要执行的任务描述（add 操作时必填）。
+        every_seconds: 循环任务的间隔秒数（如 3600 代表每小时）。
+        delay_seconds: 相对现在的延迟秒数（如 1800 代表20分钟后）。
+        cron_expr: Cron 表达式，用于特定时间点的循环（如 '0 9 * * *' 代表每天早上9点）。
+        tz: 时区（如 'Asia/Shanghai'）。
+        at: 绝对时间字符串（如 '2026-03-28T10:30:00'）。如果是相对现在的时间，请优先使用 delay_seconds。
+        job_id: 任务的唯一 ID（remove, pause, resume 操作时必填）。
+        is_task: 布尔值。如果仅仅是到提醒，设为 False；如果需要 Agent 到点后在后台调用工具、搜索网络或执行复杂思考，必须设为 True。
     """
     if action == "add":
         if cron_state._in_cron_context.get():
             return "Error: cannot schedule new jobs from within a cron job execution"
-        # 👈 修改：确保把 is_task 传递给 _add_job
         return cron_state._add_job(message, every_seconds, cron_expr, tz, at, delay_seconds, is_task=is_task)
+    
     elif action == "list":
         return cron_state._list_jobs()
+        
     elif action == "remove":
         return cron_state._remove_job(job_id)
+        
+    elif action == "pause":
+        if not job_id:
+            return "Error: job_id is required for pause"
+        job = cron_state._cron.enable_job(job_id, enabled=False)
+        return f"Successfully paused job {job_id}" if job else f"Job {job_id} not found"
+        
+    elif action == "resume":
+        if not job_id:
+            return "Error: job_id is required for resume"
+        job = cron_state._cron.enable_job(job_id, enabled=True)
+        return f"Successfully resumed job {job_id}" if job else f"Job {job_id} not found"
+        
     return f"Unknown action: {action}"

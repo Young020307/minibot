@@ -108,7 +108,7 @@ class ReactAgent:
     async def execute_stream(self, query: str, thread_id: str = "default"):
         """异步执行查询，并返回流式输出。"""
         
-        # 👉 【新增代码】每次 Agent 运行前，更新 Cron 的上下文
+        # 👉 每次 Agent 运行前，更新 Cron 的上下文
         # 渠道标记为 "terminal"，接收者标记为当前的 thread_id
         cron_state.set_context(channel="terminal", chat_id=thread_id)
 
@@ -185,7 +185,7 @@ class ReactAgent:
             logger.error(f"[ReactAgent] 删除线程失败: {e}")
 
     async def execute_background_task(self, task_query: str, thread_id: str = "heartbeat_daemon") -> str:
-        """接收心跳服务传来的任务，执行并返回完整结果。"""
+        """接收heartbeat传来的任务，执行并返回完整结果。"""
         
         # 👉 【新增代码】为后台任务更新 Cron 上下文
         # 渠道标记为 "heartbeat"，接收者标记为当前的 thread_id
@@ -199,7 +199,7 @@ class ReactAgent:
         return full_response
 
     async def close(self):
-        """关闭心跳服务 + 数据库连接"""
+        """关闭heartbeat + 数据库连接"""
         if self.heartbeat:
             self.heartbeat.stop()
             logger.info("[ReactAgent] HeartbeatService 已自动关闭")
