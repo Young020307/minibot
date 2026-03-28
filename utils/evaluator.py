@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from utils.logger_handler import logger
 
 if TYPE_CHECKING:
-    from model.base import LLMProvider
+    from heartbeat.base import LLMProvider
 
 _EVALUATE_TOOL = [
     {

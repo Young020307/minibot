@@ -1,4 +1,5 @@
 # agent/react_agent.py
+import asyncio
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -11,6 +12,7 @@ from langchain_core.messages import AIMessage
 from langchain.messages import AIMessageChunk
 from langchain.agents.middleware import TodoListMiddleware
 
+from agent.memory_manager import MemoryManager # 👉 引入记忆管理器
 from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
 from utils.logger_handler import logger
@@ -30,6 +32,8 @@ class ReactAgent:
         self.checkpointer = None
         self.agent = None
         self.context_builder = ContextBuilder()
+        self.memory_manager = MemoryManager() # 👉 实例化
+        self.message_counter = {} # 👉 记录每个 thread 的消息增量
         self.heartbeat = None  # 心跳服务实例（内部自动创建）
 
     async def initialize(self):
@@ -119,6 +123,23 @@ class ReactAgent:
         ):
             if isinstance(chunk, (AIMessage, AIMessageChunk)) and chunk.content:
                 yield chunk.content
+
+        # 👉 流式输出完成后，进行后台记忆处理机制
+        # 1. 累加对话轮数
+        self.message_counter[thread_id] = self.message_counter.get(thread_id, 0) + 1
+        
+        # 2. 设定阈值（比如每 3 轮对话，触发一次后台提取）
+        if self.message_counter[thread_id] >= 3:
+            # 获取最近的历史记录
+            history = await self.get_history(thread_id)
+            if history:
+                # 仅取最近的 6 条（3轮交互）进行提炼
+                recent_msgs = history[-6:] 
+                # asyncio.create_task 会把任务扔到后台运行，不会阻塞当前函数返回，
+                # 用户已经拿到了所有回答，此时 Agent 正在后台暗暗"做笔记"。
+                asyncio.create_task(self.memory_manager.consolidate_background(recent_msgs))
+            # 重置计数器
+            self.message_counter[thread_id] = 0
 
     # ──────────────────────────────────────────
     # ✅ 会话记忆 / 线程管理

@@ -12,7 +12,7 @@ import datetime
 from pathlib import Path
 from typing import Any, List, Dict
 
-from utils.path_tool import get_abs_path
+from utils.helpers import get_abs_path
 from utils.logger_handler import logger
 
 class ContextBuilder:
@@ -31,21 +31,38 @@ class ContextBuilder:
         """从身份、核心文件、记忆和技能中构建系统提示词"""
         parts = [self._get_identity()]
 
-        # 1. 加载基础模板 (SOUL, AGENTS, etc.)
+        # 👉 1. 加载长期事实记忆
+        long_term_memory = self._get_long_term_memory()
+        if long_term_memory:
+            parts.append(long_term_memory)
+
+        # 2. 加载基础模板 (SOUL, AGENTS, etc.)
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
 
-        # # 2. 注入常驻技能 (always: true)
-        # always_content = build_skills_context()
-        # if always_content:
-        #     parts.append(f"# Active Skills\n\n{always_content}")
-
-        # 3. 注入技能摘要索引 (动态发现层)
+        # 3. 注入技能摘要索引
         skills_summary = self._get_skills_summary()
         if skills_summary:
             parts.append(skills_summary)
+            
         return "\n\n---\n\n".join(parts)
+
+    def _get_long_term_memory(self) -> str:
+        """读取本地持久化记忆文件并注入 System Prompt"""
+        # 👉 确保这里的路径与 MemoryManager 中一致
+        memory_file = Path(r"C:\Users\Younson\Desktop\Agent\minibot\templates\memory\MEMORY.md")
+        
+        if memory_file.exists():
+            try:
+                # 因为你的模板自带了 "# Long-term Memory" 标题，所以直接拼接内容即可
+                content = memory_file.read_text(encoding="utf-8").strip()
+                return content
+            except Exception as e:
+                logger.error(f"[ContextBuilder] 读取 MEMORY.md 失败: {e}")
+                
+        # 降级：如果还没生成，返回空提示
+        return "# Long-term Memory\n\n(No explicit memories recorded yet.)"
 
     def _get_identity(self) -> str:
         """获取核心身份和跨平台策略"""

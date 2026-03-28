@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 import yaml
-from utils.path_tool import get_abs_path
+from utils.helpers import get_abs_path
 
 
 def load_agent_config(config_path: str=get_abs_path("config/agent.yml"), encoding: str="utf-8"):
