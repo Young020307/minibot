@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from typing import Callable, Awaitable
 from langchain.agents import AgentState
 from langchain.agents.middleware import SummarizationMiddleware, wrap_tool_call, before_model
@@ -40,7 +44,20 @@ async def Log_Before_Model_Middleware(
 ):         
     # 在模型执行前输出日志
     logger.info(f"[log_before_model]即将调用模型，带有{len(state['messages'])}条消息。")
-    logger.debug(f"[log_before_model]{type(state['messages'][-1]).__name__} | {state['messages'][-1].content.strip()}")
+    
+    last_message = state['messages'][-1]
+    content = last_message.content
+    
+    # 安全处理 content：判断它是字符串还是列表
+    if isinstance(content, str):
+        display_text = content.strip()
+    elif isinstance(content, list):
+        # 如果是列表（通常是多模态结构或工具块），直接将其转为字符串用于日志展示
+        display_text = str(content)
+    else:
+        display_text = str(content)
+        
+    logger.debug(f"[log_before_model]{type(last_message).__name__} | {display_text}")
 
     return None
 

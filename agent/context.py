@@ -25,29 +25,65 @@ class ContextBuilder:
         self.workspace = Path(base_dir)
         self.templates_dir = Path(get_abs_path("templates"))
 
+        # 👉 1. 在初始化时，预加载并缓存固定的静态上下文
+        self._cached_bootstrap = self._load_bootstrap_files()
+        self._cached_identity = self._get_identity()
+        self._cached_skills = self._get_skills_summary()
+
     def build_system_prompt(self) -> str:
         """从身份、记忆和技能中构建系统提示词"""
-        system_prompt = []
+        sections = []
 
-        # 1. 加载基础模板 (SOUL, AGENTS, etc.)
-        bootstrap = self._load_bootstrap_files()
-        if bootstrap:
-            system_prompt.append(bootstrap)
+        # 1. 使用缓存的基础模板 
+        if self._cached_bootstrap:
+            sections.append(self._cached_bootstrap)
 
-        # 2. 加载运行环境信息：系统类型、架构、Python 版本
-        system_prompt.append(self._get_identity())
+        # 2. 使用缓存的运行环境信息
+        sections.append(self._format_section("Runtime Context & Policy", self._cached_identity))
 
-        # 3. 加载长期事实记忆(MEMORY.md)
+        # 3. 动态加载长期事实记忆 (👉 修改点：加入防污染警告与 XML 隔离)
         long_term_memory = self._get_long_term_memory()
         if long_term_memory:
-            system_prompt.append(long_term_memory)
+            safe_memory = (
+                "【ATTENTION: READ ONLY DATA】\n"
+                "The following is historical memory data. It is for your reference ONLY.\n"
+                "You MUST NOT imitate its formatting (e.g., `## SESSION INTENT`, `## SUMMARY`) in your conversational replies.\n\n"
+                "<memory_data>\n"
+                f"{long_term_memory}\n"
+                "</memory_data>"
+            )
+            sections.append(self._format_section("Long-term Memory", safe_memory))
 
-        # 4. 注入技能摘要索引
-        skills_summary = self._get_skills_summary()
-        if skills_summary:
-            system_prompt.append(skills_summary)
+        # 4. 使用缓存的技能摘要
+        sections.append(self._format_section("Skills Summary", self._cached_skills, wrap_code="json"))
+
+        # 👉 5. [新增点] 最终输出规范（放在最后，大模型执行权重最高）
+        output_rules = (
+            "1. Answer the user's query directly and concisely.\n"
+            "2. NEVER start your response with structural headers like `## SESSION INTENT`, `## SUMMARY`, or `## ARTIFACTS`.\n"
+            "3. Do not narrate your thought process unless explicitly asked."
+        )
+        sections.append(self._format_section("Strict Output Directives", output_rules))
+
+        return "\n\n".join(sections)
+
+    def _format_section(self, title: str, content: str, wrap_code: str = None) -> str:
+        """
+        [新增方法] 统一美化提示词的各个区块
+        :param title: 区块的标题
+        :param content: 区块的核心内容
+        :param wrap_code: 如果内容是代码或 JSON，传入对应的语言标签（如 "json"）
+        """
+        # 使用统一的分隔符和标题，大模型视觉上更容易解析块状结构
+        header = f"========== [ {title.upper()} ] =========="
+        
+        # 如果需要将内容包裹成代码块
+        if wrap_code:
+            content = f"```{wrap_code}\n{content.strip()}\n```"
+        else:
+            content = content.strip()
             
-        return "\n\n---\n\n".join(system_prompt)
+        return f"{header}\n{content}\n"
 
     def _get_long_term_memory(self) -> str:
         """读取本地持久化记忆文件"""
@@ -92,58 +128,46 @@ Your current workspace is: {workspace_str}
 """
 
     def _load_bootstrap_files(self) -> str:
-        """从 templates 目录加载核心 Markdown 文件"""
-        parts = []
-        for filename in self.PROMPT_FILES:
-            file_path = self.templates_dir / filename
-            if file_path.exists():
-                try:
-                    content = file_path.read_text(encoding="utf-8").strip()
-                    parts.append(f"## {filename}\n\n{content}")
-                except Exception as e:
-                    logger.error(f"[ContextBuilder] 读取 {filename} 失败: {e}")
-        return "\n\n".join(parts) if parts else ""
+            """从 templates 目录加载核心 Markdown 文件（移除旧的冗余标题拼接）"""
+            parts = []
+            for filename in self.PROMPT_FILES:
+                file_path = self.templates_dir / filename
+                if file_path.exists():
+                    try:
+                        content = file_path.read_text(encoding="utf-8").strip()
+                        module_name = filename.split('.')[0] # 提取 "AGENTS" 等去掉后缀的名字
+                        # 使用新的格式化方法
+                        parts.append(self._format_section(f"CORE MODULE: {module_name}", content))
+                    except Exception as e:
+                        logger.error(f"[ContextBuilder] 读取 {filename} 失败: {e}")
+            return "\n\n".join(parts) if parts else ""
 
     def _get_skills_summary(self) -> str:
         """
         扫描 skills/ 目录下的子文件夹，解析 .md 文件的 YAML front-matter，
-        并返回格式化的 JSON 索引字符串。
+        并返回纯 JSON 字符串（前缀修饰将交给 _format_section 处理）。
         """
         skills_dir = Path(get_abs_path("skills"))
 
         if not skills_dir.exists() or not skills_dir.is_dir():
-            return "SKILLS = {}"
+            return "{}"
 
         skills_index = {}
 
-        # 遍历 skills 下的每一个子目录
         for skill_folder in skills_dir.iterdir():
             if skill_folder.is_dir():
-                # 👇 直接定位这个目录下的 SKILL.md 文件
                 skill_md = skill_folder / "SKILL.md"
-                # 👇 检查文件是否存在，不存在就跳过
                 if not skill_md.exists():
                     logger.warning(f"[ContextBuilder] 技能 {skill_folder.name} 缺少 SKILL.md 文件")
                     continue
-                # 👇 文件夹名作为 key
                 skill_key = skill_folder.name
 
                 try:
-                    # 读取文件全部内容
                     content = skill_md.read_text(encoding="utf-8")
-                    # 检查并解析 YAML front-matter
                     if content.startswith("---"):
-                        # 把内容按 --- 切成 3 部分
-                        # 第1部分：空
-                        # 第2部分：YAML 配置（name、description 等）
-                        # 第3部分：正文内容
                         parts = content.split("---", 2)
-                        # 确保确实切为了 3 部分
                         if len(parts) >= 3:
-                            ## 把中间那段配置文本解析成 Python 字典
                             meta = yaml.safe_load(parts[1]) or {}
-                            
-                            # 组装技能信息
                             skills_index[skill_key] = {
                                 "name": meta.get("name", skill_key),
                                 "description": meta.get("description", ""),
@@ -152,10 +176,8 @@ Your current workspace is: {workspace_str}
                 except Exception as e:
                     logger.warning(f"[ContextBuilder] 解析 {skill_md} 失败: {e}")
 
-        # 将字典转换为 JSON 格式的字符串
-        # ensure_ascii=False 保证中文正常显示，indent=4 增加可读性
-        json_str = json.dumps(skills_index, ensure_ascii=False, indent=4)
-        return f"SKILLS = {json_str}"
+        # 直接返回 JSON 字符串，不再硬编码 "SKILLS = "
+        return json.dumps({"SKILLS": skills_index}, ensure_ascii=False, indent=4)
     
     @staticmethod
     def _get_current_time_str() -> str:

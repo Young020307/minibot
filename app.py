@@ -1,9 +1,10 @@
 import os
-import time
 import uuid
 import asyncio
 import threading
 import queue
+import base64
+import mimetypes
 import streamlit as st
 from agent.react_agent import ReactAgent
 
@@ -161,7 +162,7 @@ if prompt:
 
     # 4. 调用 agent 流式生成回复（通过队列桥接异步生成器和同步前端）
     with st.spinner("思考中..."):
-        def stream_response(query, tid, medias):
+        def stream_response(query_text, tid, medias):
             q = queue.Queue()
             
             # 👈 核心修复点 1：在主线程提前将 agent 取出，赋值给局部变量
@@ -169,12 +170,22 @@ if prompt:
             
             async def _stream():
                 try:
-                    kwargs = {"thread_id": tid}
-                    if medias: 
-                        kwargs["media"] = medias 
-                        
-                    # 👈 核心修复点 2：这里使用 current_agent，而不是 st.session_state["agent"]
-                    async for chunk in current_agent.execute_stream(query, **kwargs):
+                    # 👈 核心修复点 2：将文本和图片组装成 LangChain 的多模态 List 结构
+                    payload = query_text
+                    if medias:
+                        payload = []
+                        for path in medias:
+                            mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+                            with open(path, "rb") as f:
+                                b64 = base64.b64encode(f.read()).decode("utf-8")
+                            payload.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{b64}"}
+                            })
+                        payload.append({"type": "text", "text": query_text})
+
+                    # 👈 核心修复点 3：只传入 query 和 thread_id。LangChain 支持 payload 为 str 或 list
+                    async for chunk in current_agent.execute_stream(payload, thread_id=tid):
                         q.put(chunk)
                 except Exception as e:
                     import traceback

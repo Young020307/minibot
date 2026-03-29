@@ -1,0 +1,5 @@
+local_system_tools:
+  transport: "stdio"
+  command: "python"
+  args:
+    - "C:\\Users\\Younson\\Desktop\\Agent\\minibot\\mcp\\local_mcp_server.py"

@@ -43,22 +43,25 @@ class ReactAgent:
         self.conn = await aiosqlite.connect(db_path)
         self.checkpointer = AsyncSqliteSaver(self.conn)
         await self.checkpointer.setup()
-        
         # 2. 构建 Agent
-        self._build_agent()
-
-        # 3. ✅ 核心：自动初始化并启动心跳（封装在类内部）
+        await self._build_agent()
+        # 3. 自动初始化并启动心跳（封装在类内部）
         await self._init_heartbeat()
-
         # 4. 启动 Cron 定时任务服务
         await cron_state._cron.start()
         # 5. 绑定 Agent 回调，让 Cron 能真正调用 Agent 执行任务
         cron_state.set_agent_callback(self.execute_background_task)
-
-    def _build_agent(self):
-        tools = get_all_tools()
+    
+    async def _build_agent(self):
+        tools = await get_all_tools()
         logger.info(f"[ReactAgent] 已加载工具: {[t.name for t in tools]}")
 
+        # 1. 新增一个闭包函数，Langchain在每次调用模型前会执行它来获取最新的系统提示词
+        # 传入的 state 参数是必需的（LangGraph 会自动传当前的 state 字典），即使你不用它
+        def dynamic_system_prompt(state: dict = None) -> str:
+            # 每次对话时都会调用这里，从而实时拉取本地最新的 MEMORY.md
+            return self.context_builder.build_system_prompt()
+        
         self.agent = create_agent(
             model=chat_model,  
             tools=tools,
@@ -67,7 +70,7 @@ class ReactAgent:
                         TodoListMiddleware(),
                         MonitorTools_Middleware,
                         Log_Before_Model_Middleware],       
-            system_prompt=self.context_builder.build_system_prompt(),
+            system_prompt=dynamic_system_prompt(),
         )
         logger.info("[ReactAgent] Agent 构建完成")
 
