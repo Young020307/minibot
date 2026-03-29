@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from langchain.messages import AIMessageChunk
 from langchain.agents.middleware import TodoListMiddleware
 
-from agent.memory_manager import MemoryManager # 👉 引入记忆管理器
+from agent.memory_manager import DualMemoryManager # 👉 引入记忆管理器
 from agent.context import ContextBuilder
 from agent.tools.registry import get_all_tools
 from utils.logger_handler import logger
@@ -32,9 +32,11 @@ class ReactAgent:
         self.checkpointer = None
         self.agent = None
         self.context_builder = ContextBuilder()
-        self.memory_manager = MemoryManager() # 👉 实例化
+        self.memory_manager = DualMemoryManager()
         self.message_counter = {} # 👉 记录每个 thread 的消息增量
         self.heartbeat = None  # 心跳服务实例（内部自动创建）
+        # 👉 新增：用于防止并发记忆压缩的简易锁集合
+        self._consolidating_threads = set()
 
     async def initialize(self):
         """异步初始化：数据库 + Agent + 自动创建并启动心跳服务"""
@@ -51,16 +53,16 @@ class ReactAgent:
         await cron_state._cron.start()
         # 5. 绑定 Agent 回调，让 Cron 能真正调用 Agent 执行任务
         cron_state.set_agent_callback(self.execute_background_task)
-    
+
     async def _build_agent(self):
         tools = await get_all_tools()
         logger.info(f"[ReactAgent] 已加载工具: {[t.name for t in tools]}")
 
-        # 1. 新增一个闭包函数，Langchain在每次调用模型前会执行它来获取最新的系统提示词
-        # 传入的 state 参数是必需的（LangGraph 会自动传当前的 state 字典），即使你不用它
-        def dynamic_system_prompt(state: dict = None) -> str:
-            # 每次对话时都会调用这里，从而实时拉取本地最新的 MEMORY.md
-            return self.context_builder.build_system_prompt()
+        # # 1. 新增一个闭包函数，Langchain在每次调用模型前会执行它来获取最新的系统提示词
+        # # 传入的 state 参数是必需的（LangGraph 会自动传当前的 state 字典），即使你不用它
+        # def dynamic_system_prompt(state: dict = None) -> str:
+        #     # 每次对话时都会调用这里，从而实时拉取本地最新的 MEMORY.md
+        #     return self.context_builder.build_system_prompt()
         
         self.agent = create_agent(
             model=chat_model,  
@@ -70,7 +72,7 @@ class ReactAgent:
                         TodoListMiddleware(),
                         MonitorTools_Middleware,
                         Log_Before_Model_Middleware],       
-            system_prompt=dynamic_system_prompt(),
+            system_prompt=self.context_builder.build_system_prompt(),
         )
         logger.info("[ReactAgent] Agent 构建完成")
 
@@ -126,22 +128,50 @@ class ReactAgent:
             if isinstance(chunk, (AIMessage, AIMessageChunk)) and chunk.content:
                 yield chunk.content
 
-        # 👉 流式输出完成后，进行后台记忆处理机制
-        # 1. 累加对话轮数
-        self.message_counter[thread_id] = self.message_counter.get(thread_id, 0) + 1
+        # 👉 智能记忆垃圾回收 (Token-based Garbage Collection)
+        # 1. 获取刚刚结束对话后的完整内部状态
+        try:
+            state = await self.agent.aget_state(config)
+            current_messages = state.values.get("messages", [])
+            
+            # 2. 扔给记忆管理器评估是否超载。这里用 asyncio.create_task 包裹以防阻塞响应
+            asyncio.create_task(self._background_memory_task(config, current_messages))
+            
+        except Exception as e:
+            logger.error(f"[ReactAgent] 触发记忆评估失败: {e}")
+
+    async def _background_memory_task(self, config: dict, current_messages: list):
+        """后台执行压缩并抹除 LangGraph 状态中的老消息"""
+        thread_id = config.get("configurable", {}).get("thread_id", "default")
         
-        # 2. 设定阈值（比如每 3 轮对话，触发一次后台提取）
-        if self.message_counter[thread_id] >= 3:
-            # 获取最近的历史记录
-            history = await self.get_history(thread_id)
-            if history:
-                # 仅取最近的 6 条（3轮交互）进行提炼
-                recent_msgs = history[-6:] 
-                # asyncio.create_task 会把任务扔到后台运行，不会阻塞当前函数返回，
-                # 用户已经拿到了所有回答，此时 Agent 正在后台暗暗"做笔记"。
-                asyncio.create_task(self.memory_manager.consolidate_background(recent_msgs))
-            # 重置计数器
-            self.message_counter[thread_id] = 0
+        # 👉 1. 并发拦截：如果该 thread_id 已经在做压缩了，直接跳过
+        if thread_id in self._consolidating_threads:
+            logger.info(f"[ReactAgent] {thread_id} 正在进行记忆压缩，跳过本次重复触发。")
+            return
+            
+        self._consolidating_threads.add(thread_id)
+        
+        try:
+            # 执行耗时的 LLM 总结逻辑
+            remove_instructions = await self.memory_manager.maybe_consolidate(current_messages)
+            
+            if remove_instructions:
+                try:
+                    # 👉 2. 尝试更新状态，并优雅捕获异常
+                    await self.agent.aupdate_state(config, {"messages": remove_instructions})
+                    logger.info(f"[ReactAgent] 成功清理短期状态中的 {len(remove_instructions)} 条历史记录。")
+                except ValueError as e:
+                    # 如果抛出的是 ID 不存在的错误，说明别的机制已经删除了，属于正常情况
+                    if "Attempting to delete a message with an ID that doesn't exist" in str(e):
+                        logger.warning(f"[ReactAgent] 预期内的状态拦截：消息已被其他任务清理。({e})")
+                    else:
+                        raise e  # 其他的 ValueError 依然需要暴露出来
+                        
+        except Exception as e:
+            logger.error(f"[ReactAgent] 后台记忆任务严重崩溃: {e}")
+        finally:
+            # 👉 3. 无论成功失败，确保释放锁
+            self._consolidating_threads.discard(thread_id)
 
     # ──────────────────────────────────────────
     # ✅ 会话记忆 / 线程管理

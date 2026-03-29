@@ -41,29 +41,13 @@ class ContextBuilder:
         # 2. 使用缓存的运行环境信息
         sections.append(self._format_section("Runtime Context & Policy", self._cached_identity))
 
-        # 3. 动态加载长期事实记忆 (👉 修改点：加入防污染警告与 XML 隔离)
+        # 3. 动态加载长期事实记忆(MEMORY.md) - 这是唯一每次都会重新执行的部分
         long_term_memory = self._get_long_term_memory()
         if long_term_memory:
-            safe_memory = (
-                "【ATTENTION: READ ONLY DATA】\n"
-                "The following is historical memory data. It is for your reference ONLY.\n"
-                "You MUST NOT imitate its formatting (e.g., `## SESSION INTENT`, `## SUMMARY`) in your conversational replies.\n\n"
-                "<memory_data>\n"
-                f"{long_term_memory}\n"
-                "</memory_data>"
-            )
-            sections.append(self._format_section("Long-term Memory", safe_memory))
+            sections.append(self._format_section("Long-term Memory", long_term_memory))
 
         # 4. 使用缓存的技能摘要
         sections.append(self._format_section("Skills Summary", self._cached_skills, wrap_code="json"))
-
-        # 👉 5. [新增点] 最终输出规范（放在最后，大模型执行权重最高）
-        output_rules = (
-            "1. Answer the user's query directly and concisely.\n"
-            "2. NEVER start your response with structural headers like `## SESSION INTENT`, `## SUMMARY`, or `## ARTIFACTS`.\n"
-            "3. Do not narrate your thought process unless explicitly asked."
-        )
-        sections.append(self._format_section("Strict Output Directives", output_rules))
 
         return "\n\n".join(sections)
 
@@ -86,19 +70,17 @@ class ContextBuilder:
         return f"{header}\n{content}\n"
 
     def _get_long_term_memory(self) -> str:
-        """读取本地持久化记忆文件"""
-        # 确保这里的路径与 MemoryManager 中一致
-        memory_file = Path(r"C:\Users\Younson\Desktop\Agent\minibot\templates\memory\MEMORY.md")
+        """动态加载长期事实记忆(MEMORY.md)"""
+        # 统一使用相对动态路径，避免绝对路径在迁移时报错
+        memory_file = self.workspace / "templates" / "memory" / "MEMORY.md"
         
         if memory_file.exists():
             try:
-                # 因为模板自带了 "# Long-term Memory" 标题，所以直接拼接内容即可
                 content = memory_file.read_text(encoding="utf-8").strip()
                 return content
             except Exception as e:
                 logger.error(f"[ContextBuilder] 读取 MEMORY.md 失败: {e}")
                 
-        # 如果还没生成，返回空提示
         return "# Long-term Memory\n\n(No explicit memories recorded yet.)"
 
     def _get_identity(self) -> str:

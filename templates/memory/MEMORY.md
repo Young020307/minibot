@@ -1,16 +1,26 @@
 # Long-term Memory
 
-This file stores important information that should persist across sessions.
-
-## User Information
-
+## User Profile
 - **Name**: Young
+- **Occupation**: Graduate Student at Chongqing University
+- **Location**: Zhongmu County, Zhengzhou, Henan
+- **Interests**: Photography
+- **Communication Preferences**: Prefers concise and precise communication.
 
-## User Preferences
+## Historical Interactions
+- Inquired about the AI's capabilities, toolset, and personalized settings.
+- Discussed technical topics including AI architecture and mathematical concepts.
+- Addressed concerns about data updates and conversation tracking.
+- Requested a summary of DJI drone specifications, initially intending to have it compiled into an Excel file on his desktop, but later canceled the request.
 
-## Project Context
-- **Minibot Project Structure**: Detailed directory structure provided, indicating user's focus on project organization.
+## Communication Style
+- User is attentive to details and expects clear responses.
+- Engaged in a process of information inquiry and clarification.
 
-## Important Notes
-- User has inquired about the latest AI news and confirmed their name during the session on [2026-03-29 13:20].
-- [2026-03-29 13:56] 用户进行了代码审查的讨论，特别是关于`factory.py`的结构和最佳实践，且用户详细了解了助理的多功能性。
+## Next Steps (Historical Context)
+- Tailor future interactions to Young's concise communication style.
+- Be prepared for queries related to academia, particularly in his field of study.
+- Standby for assistance with photography or tech-related inquiries.
+
+## Artifacts & Actions
+- No specific artifacts created; a canceled request for an Excel file on DJI drone specs noted.
